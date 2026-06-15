@@ -22,7 +22,8 @@ Takes **10-20 minutes** first time (pulls Helm images). Then open:
 |---------|-----|-------|
 | App | http://localhost:30800/health | — |
 | Grafana | http://localhost:3000 | admin / enlight-admin |
-| ArgoCD | http://localhost:8080 | admin password below |
+| Live Demo UI | http://localhost:30900 | Primary client demo |
+| ArgoCD | http://localhost:8082 | admin password below |
 
 ArgoCD admin password:
 
@@ -31,6 +32,14 @@ kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.pas
 ```
 
 ## Manager demo
+
+```powershell
+.\start-demo-control.bat
+```
+
+Open http://localhost:30900. Presenter guide: `docs/CLIENT-DEMO-EXPLAINED.pdf`
+
+Legacy script:
 
 ```powershell
 .\scripts\run-manager-demo.ps1

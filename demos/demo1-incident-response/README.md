@@ -1,18 +1,57 @@
-# Demo 1 — AI Incident Response
+# Outage response (Demo 1)
 
-**Story:** Scripted failure → Robusta alerts → AI explains → SLO breach → ArgoCD rollback → postmortem draft.
 
-## Build checklist
 
-- [ ] `scripts/inject-failure.ps1` — bad image or OOM
-- [ ] Robusta install on cluster
-- [ ] HolmesGPT + k8sgpt MCP connected to Claude
-- [ ] Prometheus SLO alert triggers rollback
-- [ ] `scripts/run-demo.ps1` — full reproducible run
-- [ ] Postmortem prompt template in `templates/postmortem.md`
+**UI name:** Outage response on http://localhost:30900
 
-## Done when
 
-- [ ] RCA in Claude under 60 seconds
-- [ ] Rollback completes live
-- [ ] AI explanation and rollback are two separate visible steps
+
+**Story:** App breaks → AI explains why → platform rolls back automatically.
+
+
+
+## Buttons
+
+
+
+| Button | What happens |
+
+|--------|----------------|
+
+| **Simulate outage** | Bad image on staging app (on purpose) |
+
+| **Explain with AI** | k8sgpt summarizes failure in activity log |
+
+| **Auto-fix app** | GitOps rollback + healthy deployment |
+
+
+
+**Show client:** Deployments at http://localhost:8082 (`fastapi-staging` red then green).
+
+
+
+After heal, click **Refresh** on Live Demo if dashboard still shows fail (port-forward tunnel).
+
+
+
+## Scripts
+
+
+
+```powershell
+
+.\scripts\inject-failure.ps1
+
+.\scripts\heal-rollback.ps1
+
+```
+
+
+
+## Presenter script
+
+
+
+See **Outage response** in [docs/CLIENT-DEMO-EXPLAINED.pdf](../../docs/CLIENT-DEMO-EXPLAINED.pdf)
+
+

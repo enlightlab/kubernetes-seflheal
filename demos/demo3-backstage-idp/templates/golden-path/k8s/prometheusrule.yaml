@@ -1,0 +1,29 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{SERVICE_NAME}}-alerts
+  namespace: monitoring
+  labels:
+    release: monitoring
+    app: {{SERVICE_NAME}}
+spec:
+  groups:
+    - name: {{SERVICE_NAME}}.rules
+      rules:
+        - alert: {{SERVICE_NAME}}Down
+          expr: up{job="{{SERVICE_NAME}}"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            service: {{SERVICE_NAME}}
+          annotations:
+            summary: "{{SERVICE_NAME}} is down"
+            description: "No healthy targets for {{SERVICE_NAME}} in enlight-staging"
+        - alert: {{SERVICE_NAME}}HighMemory
+          expr: container_memory_working_set_bytes{pod=~"{{SERVICE_NAME}}.*"} > 100000000
+          for: 5m
+          labels:
+            severity: warning
+            service: {{SERVICE_NAME}}
+          annotations:
+            summary: "{{SERVICE_NAME}} high memory"

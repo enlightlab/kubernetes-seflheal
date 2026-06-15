@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Enlight Lab — Cloud Config Guard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #030712; --card: #0f172a; --border: #1e293b; --text: #f8fafc;
+      --muted: #94a3b8; --green: #22c55e; --red: #ef4444; --yellow: #eab308; --blue: #3b82f6;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Inter, system-ui, sans-serif; background: var(--bg); color: var(--text);
+      min-height: 100vh; background-image: radial-gradient(ellipse 70% 50% at 50% -10%, rgba(34,211,238,.12), transparent);
+    }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 1.5rem 1rem 2.5rem; }
+    header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem; }
+    .brand { display: flex; align-items: center; gap: .85rem; }
+    .logo {
+      width: 44px; height: 44px; border-radius: 10px; background: #fff; padding: 5px;
+      display: grid; place-items: center; flex-shrink: 0;
+      box-shadow: 0 0 0 1px rgba(148,163,184,.15);
+    }
+    .logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
+    h1 { font-size: 1.5rem; font-weight: 800; }
+    .sub { color: var(--muted); font-size: .85rem; margin-top: .25rem; }
+    .nav a {
+      color: #93c5fd; text-decoration: none; font-size: .8rem; font-weight: 600;
+      padding: .45rem .75rem; border: 1px solid var(--border); border-radius: 8px; background: #111827;
+    }
+    .hero {
+      text-align: center; padding: 1.25rem; border-radius: 16px; margin-bottom: 1.25rem;
+      border: 1px solid var(--border); background: linear-gradient(160deg, #0f172a, #111827);
+    }
+    .hero-badge {
+      display: inline-block; font-size: .72rem; font-weight: 700; letter-spacing: .08em;
+      text-transform: uppercase; padding: .35rem .85rem; border-radius: 999px; margin-bottom: .75rem;
+    }
+    .hero-badge.ok { background: rgba(34,197,94,.15); color: var(--green); border: 1px solid rgba(34,197,94,.35); }
+    .hero-badge.err { background: rgba(239,68,68,.15); color: var(--red); border: 1px solid rgba(239,68,68,.35); }
+    .hero-badge.unk { background: rgba(234,179,8,.15); color: var(--yellow); border: 1px solid rgba(234,179,8,.35); }
+    .hero h2 { font-size: 1.75rem; font-weight: 800; margin-bottom: .35rem; }
+    .hero p { color: var(--muted); font-size: .9rem; }
+
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+    @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+    .panel {
+      background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 1.1rem;
+    }
+    .panel h3 { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: .75rem; }
+    .state-row { display: flex; justify-content: space-between; padding: .55rem 0; border-bottom: 1px solid #1e293b; font-size: .88rem; }
+    .state-row:last-child { border-bottom: none; }
+    .val { font-weight: 700; }
+    .val.good { color: var(--green); }
+    .val.bad { color: var(--red); }
+    .val.warn { color: var(--yellow); }
+
+    .compare {
+      display: grid; grid-template-columns: 1fr auto 1fr; gap: .75rem; align-items: center; margin-bottom: 1rem;
+    }
+    @media (max-width: 700px) { .compare { grid-template-columns: 1fr; } .arrow { display: none; } }
+    .box {
+      background: #111827; border: 1px solid var(--border); border-radius: 12px; padding: 1rem; text-align: center;
+    }
+    .box .label { font-size: .68rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+    .box .acl { font-size: 1.25rem; font-weight: 800; margin-top: .35rem; }
+    .arrow { color: var(--muted); font-size: 1.5rem; font-weight: 300; }
+
+    .cost {
+      background: rgba(239,68,68,.08); border: 1px solid rgba(239,68,68,.25); border-radius: 12px;
+      padding: 1rem; margin-bottom: 1rem; display: none;
+    }
+    .cost.show { display: block; }
+    .cost strong { color: var(--red); font-size: 1.1rem; }
+
+    .actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+    button {
+      font-family: inherit; font-size: .82rem; font-weight: 700; padding: .65rem 1rem;
+      border-radius: 10px; border: none; cursor: pointer; transition: opacity .15s;
+    }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .btn-drift { background: var(--red); color: #fff; }
+    .btn-reconcile { background: var(--green); color: #000; }
+    .btn-baseline { background: #334155; color: #fff; }
+    .btn-refresh { background: transparent; color: #93c5fd; border: 1px solid var(--border); }
+
+    .timeline { display: flex; gap: .5rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
+    .step {
+      flex: 1; min-width: 120px; text-align: center; padding: .65rem; border-radius: 10px;
+      border: 1px solid var(--border); background: #111827; font-size: .75rem; font-weight: 600; color: var(--muted);
+    }
+    .step.active { border-color: var(--blue); color: #93c5fd; background: rgba(59,130,246,.1); }
+    .step.done { border-color: rgba(34,197,94,.4); color: var(--green); }
+
+    .log {
+      background: #020617; border: 1px solid var(--border); border-radius: 10px; padding: .75rem;
+      font-family: ui-monospace, monospace; font-size: .72rem; color: #94a3b8; max-height: 160px; overflow: auto;
+      white-space: pre-wrap; display: none;
+    }
+    .log.show { display: block; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <div class="logo"><img src="/static/assets/company-logo.png" alt="Company logo" /></div>
+        <div>
+          <h1>Cloud config guard</h1>
+          <p class="sub">Compare what is in Git vs what is running in the cloud</p>
+        </div>
+      </div>
+      <div class="nav"><a href="/">← Back to live demo</a></div>
+    </header>
+
+    <div class="hero" id="hero">
+      <div class="hero-badge ok" id="heroBadge">CHECKING</div>
+      <h2 id="heroTitle">Loading infrastructure state…</h2>
+      <p id="heroSub">Comparing approved settings in Git to live storage settings</p>
+    </div>
+
+    <div class="timeline">
+      <div class="step" id="stepBaseline">1. Secure baseline</div>
+      <div class="step" id="stepDrift">2. Change detected</div>
+      <div class="step" id="stepReconcile">3. Auto-fixed</div>
+    </div>
+
+    <div class="compare">
+      <div class="box">
+        <div class="label">What we want (in Git)</div>
+        <div class="acl good" id="desiredAcl">Private</div>
+      </div>
+      <div class="arrow">≠</div>
+      <div class="box">
+        <div class="label">What's running now</div>
+        <div class="acl" id="actualAcl">—</div>
+      </div>
+    </div>
+
+    <div class="cost" id="costBox">
+      <div style="font-size:.8rem;color:var(--muted);margin-bottom:.35rem">Estimated cost exposure</div>
+      <strong id="costVal">+$15 / month</strong>
+      <div style="font-size:.78rem;color:var(--muted);margin-top:.35rem" id="violationText"></div>
+    </div>
+
+    <div class="actions">
+      <button class="btn-baseline" id="btnBaseline" onclick="runPhase('baseline')">Set secure baseline</button>
+      <button class="btn-drift" id="btnDrift" onclick="runPhase('drift')">Catch config drift</button>
+      <button class="btn-reconcile" id="btnReconcile" onclick="runPhase('reconcile')">Fix drift automatically</button>
+      <button class="btn-refresh" onclick="refresh()">Refresh</button>
+    </div>
+
+    <div class="grid">
+      <div class="panel">
+        <h3>Resource</h3>
+        <div class="state-row"><span>Bucket</span><span class="val" id="bucketName">enlight-demo</span></div>
+        <div class="state-row"><span>Provider</span><span class="val" id="provider">Floci</span></div>
+        <div class="state-row"><span>Encryption</span><span class="val good" id="encryption">AES256</span></div>
+        <div class="state-row"><span>Cloud sandbox</span><span class="val" id="flociStatus">—</span></div>
+      </div>
+      <div class="panel">
+        <h3>Compliance</h3>
+        <div class="state-row"><span>Control</span><span class="val">S3-001</span></div>
+        <div class="state-row"><span>Policy</span><span class="val">No public buckets</span></div>
+        <div class="state-row"><span>Terraform source</span><span class="val" style="font-size:.75rem" id="tfSource">main.tf</span></div>
+        <div class="state-row"><span>Sync status</span><span class="val" id="syncStatus">—</span></div>
+      </div>
+    </div>
+
+    <div class="log" id="logBox"></div>
+  </div>
+
+  <script>
+    let busy = false;
+
+    function setBusy(v) {
+      busy = v;
+      document.querySelectorAll('button').forEach(b => b.disabled = v);
+    }
+
+    function render(data) {
+      const actual = data.actual_acl || 'unknown';
+      const desired = data.desired_acl || 'private';
+      const drifted = actual === 'public-read';
+      const inSync = data.in_sync;
+
+      document.getElementById('desiredAcl').textContent = desired;
+      const actualEl = document.getElementById('actualAcl');
+      actualEl.textContent = actual;
+      actualEl.className = 'acl ' + (drifted ? 'bad' : inSync ? 'good' : 'warn');
+
+      const badge = document.getElementById('heroBadge');
+      const title = document.getElementById('heroTitle');
+      const sub = document.getElementById('heroSub');
+      const costBox = document.getElementById('costBox');
+
+      if (drifted) {
+        badge.className = 'hero-badge err';
+        badge.textContent = 'DRIFT DETECTED';
+        title.textContent = 'Infrastructure out of sync';
+        sub.textContent = 'Someone changed S3 in the console without Terraform';
+        costBox.classList.add('show');
+        document.getElementById('costVal').textContent = '+$' + (data.cost_delta_usd || 15) + ' / month';
+        document.getElementById('violationText').textContent = data.violation || 'S3 ACL is public-read';
+        document.getElementById('stepDrift').classList.add('active');
+        document.getElementById('stepReconcile').classList.remove('active', 'done');
+      } else if (inSync && actual !== 'unknown') {
+        badge.className = 'hero-badge ok';
+        badge.textContent = 'IN SYNC';
+        title.textContent = 'Infrastructure matches Terraform';
+        sub.textContent = 'Git is source of truth — no drift';
+        costBox.classList.remove('show');
+        document.getElementById('stepReconcile').classList.add('done');
+        document.getElementById('stepDrift').classList.remove('active');
+      } else {
+        badge.className = 'hero-badge unk';
+        badge.textContent = 'UNKNOWN';
+        title.textContent = 'Run Reset baseline first';
+        sub.textContent = 'Start Floci + apply Terraform baseline';
+        costBox.classList.remove('show');
+      }
+
+      document.getElementById('bucketName').textContent = data.bucket || 'enlight-demo';
+      document.getElementById('provider').textContent = data.provider || 'Floci';
+      document.getElementById('encryption').textContent = data.encryption || 'AES256';
+      document.getElementById('flociStatus').textContent = data.floci_ok ? 'Running' : 'Offline';
+      document.getElementById('flociStatus').className = 'val ' + (data.floci_ok ? 'good' : 'bad');
+      document.getElementById('tfSource').textContent = data.terraform_source || 'main.tf';
+      document.getElementById('syncStatus').textContent = inSync ? 'Synced' : (drifted ? 'Drifted' : 'Unknown');
+      document.getElementById('syncStatus').className = 'val ' + (inSync ? 'good' : drifted ? 'bad' : 'warn');
+
+      if (actual !== 'unknown' && !drifted) {
+        document.getElementById('stepBaseline').classList.add('done');
+      }
+    }
+
+    async function refresh() {
+      try {
+        const r = await fetch('/api/demo/4/status');
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error);
+        render(j.data);
+      } catch (e) {
+        document.getElementById('heroTitle').textContent = 'Cannot reach Demo Control API';
+        document.getElementById('heroSub').textContent = e.message;
+      }
+    }
+
+    async function runPhase(phase) {
+      if (busy) return;
+      setBusy(true);
+      const logBox = document.getElementById('logBox');
+      logBox.classList.add('show');
+      logBox.textContent = 'Running ' + phase + '…';
+      try {
+        const r = await fetch('/api/demo/4/' + phase, { method: 'POST' });
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error);
+        render(j.data);
+        logBox.textContent = j.data.log || 'Complete.';
+        if (j.data.drift) {
+          document.getElementById('stepDrift').classList.add('active');
+        }
+        if (j.data.reconciled) {
+          document.getElementById('stepReconcile').classList.add('done');
+          document.getElementById('stepDrift').classList.remove('active');
+        }
+        if (phase === 'baseline') {
+          document.getElementById('stepBaseline').classList.add('done');
+        }
+      } catch (e) {
+        logBox.textContent = 'Error: ' + e.message;
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 15000);
+  </script>
+</body>
+</html>

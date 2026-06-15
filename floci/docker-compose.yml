@@ -1,13 +1,24 @@
-# AWS local emulator for Demo 4 (Drift & Cost) — NOT for Kubernetes/EKS
-# See Floci_Setup_Guide.pdf
+# Local AWS emulator for Demo 4 (Cloud config guard) — NOT for Kubernetes/EKS
+# API only on :4566 — use Demo Control http://localhost:30900 for the client UI
 services:
   floci:
     image: floci/floci:latest
+    container_name: enlight-floci
     ports:
       - "4566:4566"
+    environment:
+      FLOCI_HOSTNAME: floci
+      FLOCI_STORAGE_MODE: persistent
+      FLOCI_STORAGE_PERSISTENT_PATH: /app/data
     volumes:
       - floci-data:/app/data
       - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - floci_net
 
 volumes:
   floci-data:
+
+networks:
+  floci_net:
+    name: enlight_floci_net

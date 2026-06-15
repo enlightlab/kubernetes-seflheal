@@ -16,7 +16,7 @@ $ErrorActionPreference = "SilentlyContinue"
 kubectl config use-context $Ctx 2>&1 | Out-Null
 $ErrorActionPreference = $prevEap
 
-if (Test-Path $PidFile) { Remove-Item $PidFile -Force }
+& (Join-Path $PSScriptRoot "stop-port-forwards.ps1")
 New-Item -ItemType File -Path $PidFile -Force | Out-Null
 
 Write-Host "Starting port-forwards..." -ForegroundColor Cyan
@@ -24,7 +24,8 @@ Write-Host "Starting port-forwards..." -ForegroundColor Cyan
 # Always start app + ArgoCD (do not let slow API block these)
 Start-Forward "fastapi" @("port-forward", "-n", "enlight-staging", "svc/fastapi", "30800:80") 30800
 # insecure mode in helm values -> service port 80
-Start-Forward "argocd" @("port-forward", "-n", "argocd", "svc/argocd-server", "8080:80") 8080
+# Port 8080 is often taken by k8sgpt MCP - use 8082 for ArgoCD
+Start-Forward "argocd" @("port-forward", "-n", "argocd", "svc/argocd-server", "8082:80") 8082
 
 # Grafana optional - skip if API slow
 $ErrorActionPreference = "SilentlyContinue"
@@ -40,6 +41,6 @@ Start-Sleep -Seconds 2
 Write-Host ""
 Write-Host "Port-forwards started." -ForegroundColor Green
 Write-Host "  App:     http://localhost:30800/health" -ForegroundColor Cyan
-Write-Host "  ArgoCD:  http://localhost:8080" -ForegroundColor Cyan
+Write-Host "  ArgoCD:  http://localhost:8082" -ForegroundColor Cyan
 Write-Host "  Grafana: http://localhost:3000 (only if line above shows grafana pid)" -ForegroundColor Gray
 Write-Host "Stop with: .\scripts\stop-platform.ps1" -ForegroundColor Gray

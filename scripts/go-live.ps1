@@ -33,6 +33,12 @@ if (-not $clusterOk) {
 
 Start-Sleep -Seconds 3
 
+Write-Host "Starting cloud sandbox for config-guard demo..." -ForegroundColor Yellow
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = "SilentlyContinue"
+& (Join-Path $Root "floci\start-floci-stack.ps1") 2>&1 | Out-Null
+$ErrorActionPreference = $prevEap
+
 Write-Host ""
 Write-Host "Running quick validation..." -ForegroundColor Yellow
 & (Join-Path $PSScriptRoot "test-all.ps1") -Quick
@@ -42,9 +48,9 @@ Write-Host "========================================" -ForegroundColor Green
 Write-Host "  GO LIVE COMPLETE" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "  App:    http://localhost:30800/health" -ForegroundColor Cyan
-Write-Host "  ArgoCD: http://localhost:8080  (run port-forward-argocd.ps1 in 2nd window if needed)" -ForegroundColor Cyan
+Write-Host "  Demo UI:  http://localhost:30900" -ForegroundColor Cyan
+Write-Host "  App:      http://localhost:30800/health" -ForegroundColor Cyan
+Write-Host "  ArgoCD:   http://localhost:8082" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  Full demo:  .\scripts\run-12pm-demo.ps1" -ForegroundColor Yellow
-Write-Host "  MCP guide:  docs\MCP-CONNECT-GUIDE.md" -ForegroundColor Yellow
+Write-Host "  Then open Demo UI and click Refresh" -ForegroundColor Yellow
 Write-Host ""

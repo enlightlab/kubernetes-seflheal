@@ -20,3 +20,8 @@ Thumbs.db
 *.log
 /tmp/
 scripts/.port-forward-pids.txt
+scripts/.demo-control-pid.txt
+floci/.vendor/
+workload/scaffolded/.last-idp-service
+workload/scaffolded/.last-idp-branch
+demos/demo5-pr-compliance/pr-runs/

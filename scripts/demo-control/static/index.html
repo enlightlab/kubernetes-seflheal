@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Enlight Lab — Live Platform Demo</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #030712; --card: #0f172a; --card2: #111827; --border: #1e293b;
+      --text: #f8fafc; --muted: #94a3b8; --blue: #3b82f6; --green: #22c55e;
+      --red: #ef4444; --yellow: #eab308; --purple: #a855f7; --cyan: #22d3ee;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Inter, system-ui, sans-serif; background: var(--bg); color: var(--text);
+      min-height: 100vh; background-image:
+        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(59,130,246,.18), transparent),
+        radial-gradient(ellipse 60% 40% at 100% 0%, rgba(168,85,247,.12), transparent);
+    }
+    .wrap { max-width: 1280px; margin: 0 auto; padding: 1.25rem 1rem 2.5rem; }
+
+    header {
+      display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+      flex-wrap: wrap; margin-bottom: 1.25rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border);
+    }
+    .brand { display: flex; align-items: center; gap: .85rem; }
+    .logo {
+      width: 48px; height: 48px; border-radius: 10px;
+      background: #fff; padding: 6px;
+      display: grid; place-items: center; flex-shrink: 0;
+      box-shadow: 0 0 0 1px rgba(148,163,184,.15);
+    }
+    .logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
+    h1 { font-size: 1.35rem; font-weight: 800; letter-spacing: -.02em; }
+    .sub { color: var(--muted); font-size: .82rem; margin-top: .15rem; }
+    .header-right { display: flex; align-items: center; gap: .65rem; }
+    .pulse-dot {
+      width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+      box-shadow: 0 0 0 0 rgba(34,197,94,.6); animation: pulse 2s infinite;
+    }
+    .pulse-dot.busy { background: var(--yellow); animation: pulseY 1s infinite; }
+  .pulse-dot.err { background: var(--red); animation: none; }
+    @keyframes pulse { 70% { box-shadow: 0 0 0 8px rgba(34,197,94,0); } 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); } }
+    @keyframes pulseY { 70% { box-shadow: 0 0 0 8px rgba(234,179,8,0); } }
+    .badge {
+      font-size: .75rem; font-weight: 600; padding: .35rem .75rem; border-radius: 999px;
+      background: rgba(34,197,94,.12); color: var(--green); border: 1px solid rgba(34,197,94,.25);
+    }
+    .badge.busy { background: rgba(234,179,8,.12); color: var(--yellow); border-color: rgba(234,179,8,.3); }
+
+    .links { display: flex; flex-wrap: wrap; gap: .45rem; margin-bottom: 1rem; }
+    .links a {
+      font-size: .75rem; font-weight: 500; color: #93c5fd; text-decoration: none;
+      padding: .4rem .7rem; border: 1px solid var(--border); border-radius: 8px; background: var(--card2);
+      transition: border-color .15s, background .15s;
+    }
+    .links a:hover { border-color: var(--blue); background: #1e293b; }
+
+    .status-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: .5rem; margin-bottom: 1rem;
+    }
+    .stat-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+      padding: .65rem .75rem; display: flex; align-items: center; gap: .5rem;
+    }
+    .stat-icon {
+      width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center;
+      font-size: .65rem; font-weight: 700; flex-shrink: 0;
+    }
+    .stat-icon.ok { background: rgba(34,197,94,.15); color: var(--green); }
+    .stat-icon.fail { background: rgba(239,68,68,.15); color: var(--red); }
+    .stat-icon.warn { background: rgba(234,179,8,.15); color: var(--yellow); }
+    .stat-label { font-size: .68rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .stat-val { font-size: .78rem; font-weight: 600; margin-top: .1rem; }
+
+    .layout { display: grid; grid-template-columns: 1fr 380px; gap: 1rem; }
+    @media (max-width: 960px) { .layout { grid-template-columns: 1fr; } }
+
+    .card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+      padding: 1rem 1.1rem; margin-bottom: 1rem;
+    }
+    .card h2 {
+      font-size: .88rem; font-weight: 700; margin-bottom: .85rem;
+      display: flex; align-items: center; gap: .5rem;
+    }
+    .card h2 span.tag {
+      font-size: .65rem; font-weight: 600; padding: .15rem .45rem; border-radius: 4px;
+      background: rgba(59,130,246,.15); color: #93c5fd;
+    }
+    .guided-card {
+      border-color: rgba(168,85,247,.35);
+      background: linear-gradient(160deg, rgba(76,29,149,.2) 0%, var(--card) 45%);
+    }
+
+    .steps-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); gap: .5rem;
+    }
+    .step-btn {
+      position: relative; text-align: left; padding: .65rem .7rem .65rem 2.2rem;
+      border-radius: 10px; border: 1px solid var(--border); background: var(--card2);
+      color: var(--text); font-family: inherit; font-size: .75rem; font-weight: 600;
+      cursor: pointer; transition: all .15s; min-height: 52px;
+    }
+    .step-btn:hover:not(:disabled) { border-color: var(--blue); transform: translateY(-1px); }
+    .step-btn:disabled { opacity: .5; cursor: not-allowed; }
+    .step-btn .step-num {
+      position: absolute; left: .55rem; top: 50%; transform: translateY(-50%);
+      width: 20px; height: 20px; border-radius: 6px; background: #334155;
+      font-size: .65rem; display: grid; place-items: center; font-weight: 700;
+    }
+    .step-btn.running { border-color: var(--yellow); background: rgba(234,179,8,.08); }
+    .step-btn.running .step-num { background: var(--yellow); color: #000; animation: pulseY 1s infinite; }
+    .step-btn.done { border-color: rgba(34,197,94,.4); }
+    .step-btn.done .step-num { background: var(--green); color: #000; }
+    .step-btn.fail { border-color: rgba(239,68,68,.4); }
+    .step-btn.fail .step-num { background: var(--red); }
+    .step-btn.active-ring { outline: 2px solid var(--cyan); outline-offset: 1px; }
+
+    .action-row { display: flex; flex-wrap: wrap; gap: .45rem; }
+  .action-btn {
+      font-family: inherit; font-size: .75rem; font-weight: 600; cursor: pointer;
+      padding: .5rem .8rem; border-radius: 8px; border: 1px solid transparent; color: #fff;
+      background: var(--blue); transition: all .15s; display: inline-flex; align-items: center; gap: .4rem;
+    }
+    .action-btn:hover:not(:disabled) { filter: brightness(1.08); }
+    .action-btn:disabled { opacity: .45; cursor: not-allowed; }
+    .action-btn.danger { background: rgba(239,68,68,.9); }
+    .action-btn.ok { background: rgba(34,197,94,.9); }
+    .action-btn.secondary { background: #334155; border-color: var(--border); }
+    .action-btn.running::after {
+      content: ''; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,.3);
+      border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .live-panel {
+      background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+      padding: 1rem; position: sticky; top: 1rem;
+    }
+    .live-panel h2 { font-size: .88rem; font-weight: 700; margin-bottom: .75rem; }
+
+    .progress-wrap {
+      height: 4px; background: #1e293b; border-radius: 4px; overflow: hidden; margin-bottom: .85rem;
+      display: none;
+    }
+    .progress-wrap.show { display: block; }
+    .progress-bar {
+      height: 100%; width: 30%; background: linear-gradient(90deg, var(--blue), var(--cyan));
+      border-radius: 4px; animation: progress 1.5s ease-in-out infinite;
+    }
+    @keyframes progress { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
+
+    .now-running {
+      display: none; align-items: center; gap: .6rem; padding: .7rem .85rem;
+      background: rgba(59,130,246,.1); border: 1px solid rgba(59,130,246,.25);
+      border-radius: 10px; margin-bottom: .85rem; font-size: .8rem;
+    }
+    .now-running.show { display: flex; }
+    .spinner {
+      width: 18px; height: 18px; border: 2px solid rgba(147,197,253,.3);
+      border-top-color: var(--cyan); border-radius: 50%; animation: spin .8s linear infinite; flex-shrink: 0;
+    }
+
+    .result-box {
+      background: #020617; border: 1px solid var(--border); border-radius: 10px;
+      padding: .75rem; margin-bottom: .85rem; min-height: 80px; display: none;
+    }
+    .result-box.show { display: block; }
+    .result-title { font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: .4rem; }
+    .result-main { font-size: .95rem; font-weight: 700; margin-bottom: .5rem; }
+    .result-main.ok { color: var(--green); }
+    .result-main.err { color: var(--red); }
+    .result-main.run { color: var(--yellow); }
+    .job-list { display: flex; flex-direction: column; gap: .35rem; }
+    .job-row {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: .75rem; padding: .35rem .5rem; background: #0f172a; border-radius: 6px;
+    }
+    .job-badge {
+      font-size: .65rem; font-weight: 700; padding: .15rem .45rem; border-radius: 4px; text-transform: uppercase;
+    }
+    .job-badge.success { background: rgba(34,197,94,.2); color: var(--green); }
+    .job-badge.failure { background: rgba(239,68,68,.2); color: var(--red); }
+    .job-badge.skipped { background: rgba(148,163,184,.15); color: var(--muted); }
+    .job-badge.running { background: rgba(234,179,8,.2); color: var(--yellow); }
+
+    .open-link {
+      display: inline-block; margin-top: .5rem; font-size: .75rem; color: var(--cyan);
+      text-decoration: none; font-weight: 600;
+    }
+    .open-link:hover { text-decoration: underline; }
+
+    .log {
+      background: #020617; border: 1px solid var(--border); border-radius: 10px;
+      padding: .65rem; font-family: ui-monospace, monospace; font-size: .68rem;
+      color: #94a3b8; height: 200px; overflow-y: auto;
+    }
+    .log div { margin-bottom: .2rem; line-height: 1.4; }
+    .log .ok { color: var(--green); font-weight: 600; }
+    .log .err { color: var(--red); font-weight: 600; }
+    .log .info { color: #93c5fd; }
+    .log .warn { color: var(--yellow); font-weight: 600; }
+    .log .drift { color: #fb923c; font-weight: 700; background: rgba(239,68,68,.08); padding: .15rem .25rem; border-radius: 4px; }
+    .log .reconcile { color: var(--green); font-weight: 700; background: rgba(34,197,94,.08); padding: .15rem .25rem; border-radius: 4px; }
+
+    .drift-panel {
+      background: #020617; border: 1px solid var(--border); border-radius: 10px;
+      padding: .75rem; margin-bottom: .75rem;
+    }
+    .drift-panel.synced { border-color: rgba(34,197,94,.35); }
+    .drift-panel.drifted { border-color: rgba(239,68,68,.45); background: rgba(239,68,68,.06); }
+    .drift-head {
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: .6rem;
+      font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    }
+    .drift-badge {
+      font-size: .65rem; padding: .2rem .5rem; border-radius: 999px; font-weight: 700;
+    }
+    .drift-badge.ok { background: rgba(34,197,94,.2); color: var(--green); }
+    .drift-badge.err { background: rgba(239,68,68,.2); color: var(--red); }
+    .drift-badge.unk { background: rgba(234,179,8,.2); color: var(--yellow); }
+    .drift-compare {
+      display: grid; grid-template-columns: 1fr auto 1fr; gap: .5rem; align-items: center; margin-bottom: .5rem;
+    }
+    .drift-box {
+      text-align: center; padding: .5rem; border-radius: 8px; background: #0f172a; border: 1px solid var(--border);
+    }
+    .drift-box .lbl { font-size: .62rem; color: var(--muted); text-transform: uppercase; }
+    .drift-box .val { font-size: .95rem; font-weight: 800; margin-top: .2rem; }
+    .drift-box .val.good { color: var(--green); }
+    .drift-box .val.bad { color: var(--red); }
+    .drift-meta { font-size: .72rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: .75rem; }
+    .drift-meta strong { color: var(--text); }
+    .drift-cost { color: var(--red); font-weight: 700; }
+
+    .overlay {
+      display: none; position: fixed; inset: 0; background: rgba(3,7,18,.55);
+      z-index: 100; align-items: center; justify-content: center; backdrop-filter: blur(2px);
+    }
+    .overlay.show { display: flex; }
+    .overlay-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+      padding: 1.5rem 2rem; text-align: center; min-width: 280px;
+      box-shadow: 0 25px 50px rgba(0,0,0,.5);
+    }
+    .overlay-card .spinner { width: 36px; height: 36px; margin: 0 auto .85rem; border-width: 3px; }
+    .overlay-card p { font-size: .9rem; font-weight: 600; }
+    .overlay-card small { display: block; margin-top: .35rem; color: var(--muted); font-size: .78rem; }
+  </style>
+</head>
+<body>
+  <div class="overlay" id="overlay">
+    <div class="overlay-card">
+      <div class="spinner"></div>
+      <p id="overlayText">Running step...</p>
+      <small>Please wait — this usually takes under a minute</small>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <div class="logo"><img src="/static/assets/company-logo.png" alt="Company logo" /></div>
+        <div>
+          <h1>Enlight Lab — Live Demo</h1>
+          <p class="sub">Security, recovery, and deployment — one platform, live in your browser</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="pulse-dot" id="pulseDot"></div>
+        <span class="badge" id="liveBadge">Checking systems...</span>
+      </div>
+    </header>
+
+    <div class="links">
+      <a href="http://localhost:30800" target="_blank">App dashboard</a>
+      <a href="http://localhost:30800/idp" target="_blank">Developer portal</a>
+      <a href="http://localhost:8082" target="_blank">Deployments (GitOps)</a>
+      <a href="http://localhost:3000" target="_blank">Monitoring</a>
+      <a href="https://github.com/kirtiprasad2003/enlight-lab-platform/actions" target="_blank">Build pipelines</a>
+      <a href="https://github.com/kirtiprasad2003/enlight-lab-platform/actions/workflows/pr-compliance.yml" target="_blank">Pull request checks</a>
+    </div>
+
+    <div class="status-grid" id="statusGrid"></div>
+
+    <div class="layout">
+      <div>
+        <div class="card guided-card">
+          <h2>Guided walkthrough <span class="tag">15 min · 10 steps</span></h2>
+          <div class="steps-grid" id="guidedSteps"></div>
+        </div>
+
+        <div class="card">
+          <h2>Release safety <span class="tag">CI blocks bad deploys</span></h2>
+          <div class="action-row">
+            <button class="action-btn danger" data-action="d2b" onclick="run('POST','/api/demo/2/non-compliant','Block unsafe release',this)">Block unsafe release</button>
+            <button class="action-btn ok" data-action="d2p" onclick="run('POST','/api/demo/2/compliant','Approve safe release',this)">Approve safe release</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Outage response <span class="tag">AI finds and fixes issues</span></h2>
+          <div class="action-row">
+            <button class="action-btn danger" onclick="run('POST','/api/demo/1/inject','Simulate outage',this)">Simulate outage</button>
+            <button class="action-btn" onclick="run('POST','/api/demo/1/explain','Explain with AI',this)">Explain with AI</button>
+            <button class="action-btn ok" onclick="run('POST','/api/demo/1/heal','Auto-fix app',this)">Auto-fix app</button>
+          </div>
+        </div>
+
+        <div class="card" id="demo4Card">
+          <h2>Cloud config guard <span class="tag">Catch drift &amp; cost risk</span></h2>
+          <div class="drift-panel" id="driftPanel">
+            <div class="drift-head">
+              <span>Storage settings · enlight-demo</span>
+              <span class="drift-badge unk" id="driftBadge">CHECKING</span>
+            </div>
+            <div class="drift-compare">
+              <div class="drift-box">
+                <div class="lbl">What we want (in Git)</div>
+                <div class="val good" id="driftDesired">Private</div>
+              </div>
+              <div style="color:var(--muted);font-weight:300" id="driftSep">≠</div>
+              <div class="drift-box">
+                <div class="lbl">What's running now</div>
+                <div class="val" id="driftActual">—</div>
+              </div>
+            </div>
+            <div class="drift-meta">
+              <span id="driftCostWrap" style="display:none">Extra cost risk: <span class="drift-cost" id="driftCost">+$15/mo</span></span>
+            </div>
+            <p id="driftHint" style="font-size:.72rem;color:#93c5fd;margin:.5rem 0 0;line-height:1.45">
+              Loading…
+            </p>
+          </div>
+          <div class="action-row">
+            <button class="action-btn secondary" onclick="run('POST','/api/demo/4/baseline','Set secure baseline',this)">1. Set secure baseline</button>
+            <button class="action-btn danger" onclick="run('POST','/api/demo/4/drift','Catch config drift',this)">2. Catch config drift</button>
+            <button class="action-btn ok" onclick="run('POST','/api/demo/4/reconcile','Fix drift automatically',this)">3. Fix drift automatically</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Code review security <span class="tag">Every change is scanned</span></h2>
+          <div class="action-row">
+            <button class="action-btn danger" onclick="run('POST','/api/demo/5/non-compliant','Open risky change request',this)">Open risky change request</button>
+            <button class="action-btn ok" onclick="run('POST','/api/demo/5/compliant','Open safe change request',this)">Open safe change request</button>
+            <button class="action-btn secondary" onclick="run('GET','/api/demo/5/status','View check results',this)">View check results</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>New service onboarding <span class="tag">Main platform story</span></h2>
+          <p style="font-size:.72rem;color:var(--muted);margin:-.4rem 0 .5rem;line-height:1.45">
+            Each click on <strong>Create new app</strong> provisions a brand-new service with monitoring and pipelines already wired.
+          </p>
+          <div style="font-size:.75rem;margin-bottom:.65rem;padding:.5rem .65rem;background:#020617;border:1px solid var(--border);border-radius:8px">
+            <span style="color:var(--muted)">App being built:</span>
+            <strong id="demo3Current" style="color:#93c5fd">—</strong>
+            <div id="demo3Catalog" style="margin-top:.4rem;color:var(--muted);font-size:.68rem"></div>
+          </div>
+          <div class="action-row">
+            <button class="action-btn" onclick="run('POST','/api/demo/3/scaffold','Create new app',this)">Create new app</button>
+            <button class="action-btn" onclick="run('POST','/api/demo/3/pr','Submit for review',this)">Submit for review</button>
+            <button class="action-btn ok" onclick="run('POST','/api/demo/3/deploy','Go live',this)">Go live</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="live-panel">
+        <h2>What just happened</h2>
+        <div class="progress-wrap" id="progressWrap"><div class="progress-bar"></div></div>
+        <div class="now-running" id="nowRunning">
+          <div class="spinner"></div>
+          <span id="nowRunningText">Executing...</span>
+        </div>
+        <div class="result-box" id="resultBox">
+          <div class="result-title">Latest outcome</div>
+          <div class="result-main" id="resultMain">—</div>
+          <div class="job-list" id="jobList"></div>
+          <a class="open-link" id="openLink" href="#" target="_blank" style="display:none">Open in GitHub / ArgoCD →</a>
+        </div>
+        <div style="display:flex;gap:.4rem;margin-bottom:.5rem">
+          <button class="action-btn secondary" onclick="clearLog()">Clear log</button>
+          <button class="action-btn secondary" onclick="refreshStatus()">Refresh</button>
+        </div>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const GUIDED = [
+      { label: 'Health check', fn: () => refreshStatus() },
+      { label: 'Block unsafe release', fn: () => run('POST','/api/demo/2/non-compliant','Block unsafe release') },
+      { label: 'Approve safe release', fn: () => run('POST','/api/demo/2/compliant','Approve safe release') },
+      { label: 'Simulate outage', fn: () => run('POST','/api/demo/1/inject','Simulate outage') },
+      { label: 'Explain with AI', fn: () => run('POST','/api/demo/1/explain','Explain with AI') },
+      { label: 'Auto-fix app', fn: () => run('POST','/api/demo/1/heal','Auto-fix app') },
+      { label: 'Open risky change request', fn: () => run('POST','/api/demo/5/non-compliant','Open risky change request') },
+      { label: 'Create new app', fn: () => run('POST','/api/demo/3/scaffold','Create new app') },
+      { label: 'Catch config drift', fn: () => run('POST','/api/demo/4/drift','Catch config drift') },
+      { label: 'Fix drift automatically', fn: () => run('POST','/api/demo/4/reconcile','Fix drift automatically') },
+    ];
+
+    function formatAcl(acl) {
+      if (acl === 'private') return 'Private (secure)';
+      if (acl === 'public-read') return 'Public (unsafe)';
+      if (acl === 'unknown') return 'Unknown';
+      return acl || '—';
+    }
+
+    function isDriftAction(label) {
+      return /baseline|drift|Fix drift|Set secure|Catch config/i.test(label);
+    }
+
+    function isOnboardingAction(label) {
+      return /Create new|Submit for|Go live/.test(label);
+    }
+
+    function isBlockAction(label) {
+      return /Block unsafe|Open risky/.test(label);
+    }
+
+    function isPassAction(label) {
+      return /Approve safe|Open safe change/.test(label);
+    }
+
+    let busy = false;
+    let activeStep = -1;
+    const logEl = document.getElementById('log');
+    const stepEls = [];
+
+    function initGuided() {
+      const grid = document.getElementById('guidedSteps');
+      GUIDED.forEach((s, i) => {
+        const b = document.createElement('button');
+        b.className = 'step-btn';
+        b.innerHTML = `<span class="step-num">${i+1}</span>${s.label}`;
+        b.onclick = () => runGuided(i);
+        grid.appendChild(b);
+        stepEls.push(b);
+      });
+    }
+
+    function log(msg, cls = '') {
+      const line = document.createElement('div');
+      if (cls) line.className = cls;
+      line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      logEl.appendChild(line);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    const DEMO_INTRO = {
+      'Health check': 'Checking app health, deployments, and monitoring…',
+      'Block unsafe release': 'Sending a bad release to the pipeline — it should be blocked…',
+      'Approve safe release': 'Sending a good release — it should be approved…',
+      'Simulate outage': 'Breaking the staging app on purpose to show recovery…',
+      'Explain with AI': 'AI is reading cluster signals and explaining the problem…',
+      'Auto-fix app': 'Rolling back to the last good version automatically…',
+      'Open risky change request': 'Opening a pull request with secrets and unsafe settings…',
+      'Open safe change request': 'Opening a pull request with clean, compliant config…',
+      'View check results': 'Loading the latest security scan results…',
+      'Create new app': 'Provisioning a brand-new service with full platform defaults…',
+      'Submit for review': 'Opening a pull request so the team can review the change…',
+      'Go live': 'Publishing the app through automated deployment…',
+      'Set secure baseline': 'Applying the approved secure storage settings from Git…',
+      'Catch config drift': 'Simulating someone changing cloud settings outside Git…',
+      'Fix drift automatically': 'Restoring cloud settings to match what is in Git…',
+    };
+
+    function shouldSkipLogLine(line) {
+      const t = line.trim();
+      if (!t) return true;
+      if (/^SAY:/i.test(t)) return true;
+      if (/^===/.test(t)) return true;
+      if (/^Phase:/i.test(t)) return true;
+      if (/^\[\d+\]\s*Ensure Floci/i.test(t)) return true;
+      if (/^terraform (init|plan|apply)/i.test(t) && !t.includes('RESULT')) return true;
+      if (/^No changes\./i.test(t)) return true;
+      if (/^Plan:|^Refreshing state/i.test(t)) return true;
+      return false;
+    }
+
+    function logClassForLine(line) {
+      const u = line.toUpperCase();
+      if (u.includes('DRIFT DETECTED') || u.includes('VIOLATION')) return 'drift';
+      if (u.includes('RECONCILED')) return 'reconcile';
+      if (u.includes('COST DELTA') || u.includes('PUBLIC-READ') || u.includes('MANUAL CHANGE')) return 'warn';
+      if (u.includes('RESULT:') && (u.includes('PASS') || u.includes('BASELINE') || u.includes('RECONCILED'))) return 'ok';
+      if (u.includes('ERROR') || u.includes('FAILED') || u.includes('BLOCKED')) return 'err';
+      if (u.includes('SIMULATING') || u.includes('TERRAFORM')) return 'info';
+      return 'info';
+    }
+
+    function logScriptHighlights(raw) {
+      if (!raw) return;
+      const seen = new Set();
+      raw.split('\n').forEach(line => {
+        const t = line.trim();
+        if (shouldSkipLogLine(t)) return;
+        const interesting = /RESULT:|VIOLATION:|COST DELTA:|DRIFT|RECONCILED|Manual change|BLOCKED|PASS|VIOLATION|ImagePull|Synced|Healthy|PR #|already scaffolded|already live|CI workflow|Open:/i.test(t);
+        if (!interesting && !t.startsWith('[')) return;
+        if (seen.has(t)) return;
+        seen.add(t);
+        log(t.replace(/^RESULT:\s*/i, ''), logClassForLine(t));
+      });
+    }
+
+    function logClientOutcome(label, data) {
+      const stories = {
+        'Set secure baseline': ['Secure baseline applied — storage matches what is defined in Git', 'ok'],
+        'Catch config drift': [
+          'Drift detected — live cloud settings no longer match Git',
+          'drift',
+          data.violation ? data.violation : 'Storage was changed to public outside approved process',
+          'drift',
+          data.cost_delta_usd ? `Estimated extra cost if ignored: ~$${data.cost_delta_usd}/month` : null,
+          'warn',
+        ],
+        'Fix drift automatically': ['Fixed — cloud settings restored to match Git', 'reconcile'],
+        'Block unsafe release': ['Unsafe release blocked before it could reach production', 'ok'],
+        'Approve safe release': ['Safe release approved by automated checks', 'ok'],
+        'Simulate outage': ['Outage simulated — staging app is down on purpose', 'warn'],
+        'Auto-fix app': ['App recovered — deployment is healthy again', 'ok'],
+        'Open risky change request': data.pr_number ? [`Change request #${data.pr_number} — security checks should fail`, 'warn'] : null,
+        'Open safe change request': data.pr_number ? [`Change request #${data.pr_number} — security checks should pass`, 'ok'] : null,
+        'Create new app': data.service
+          ? [`New app ready: ${data.service}`, 'ok']
+          : null,
+        'Submit for review': data.pr_number
+          ? [`Review request #${data.pr_number} opened for ${data.service}`, 'ok']
+          : null,
+        'Go live': data.service
+          ? [`${data.service} deployment: ${data.argocd || 'in progress'}`, data.argocd && data.argocd.includes('Healthy') ? 'ok' : 'info']
+          : null,
+      };
+      const story = stories[label];
+      if (!story) return;
+      for (let i = 0; i < story.length; i += 2) {
+        if (story[i]) log(story[i], story[i + 1] || 'info');
+      }
+    }
+
+    function renderDriftPanel(data) {
+      if (!data || !data.bucket) return;
+      const panel = document.getElementById('driftPanel');
+      const badge = document.getElementById('driftBadge');
+      const actual = data.actual_acl || 'unknown';
+      const desired = data.desired_acl || 'private';
+      const drifted = actual === 'public-read';
+      const inSync = data.in_sync;
+
+      document.getElementById('driftDesired').textContent = formatAcl(desired);
+      const actualEl = document.getElementById('driftActual');
+      actualEl.textContent = formatAcl(actual);
+      actualEl.className = 'val ' + (drifted ? 'bad' : inSync ? 'good' : '');
+
+      const sep = document.getElementById('driftSep');
+      if (sep) sep.textContent = (inSync && actual !== 'unknown') ? '=' : '≠';
+
+      const hint = document.getElementById('driftHint');
+      if (hint) {
+        hint.textContent = data.client_hint || (
+          inSync ? 'Git and cloud match — ready to demo drift.' : 'Click 1. Set secure baseline to begin.'
+        );
+        hint.style.color = drifted ? '#fbbf24' : (inSync && actual !== 'unknown' ? '#86efac' : '#93c5fd');
+      }
+
+      const costWrap = document.getElementById('driftCostWrap');
+      if (drifted && data.cost_delta_usd) {
+        costWrap.style.display = 'inline';
+        document.getElementById('driftCost').textContent = '+$' + data.cost_delta_usd + '/mo';
+      } else {
+        costWrap.style.display = 'none';
+      }
+
+      panel.classList.remove('synced', 'drifted');
+      if (drifted) {
+        panel.classList.add('drifted');
+        badge.className = 'drift-badge err';
+        badge.textContent = 'OUT OF SYNC';
+      } else if (inSync && actual !== 'unknown') {
+        panel.classList.add('synced');
+        badge.className = 'drift-badge ok';
+        badge.textContent = 'MATCHES GIT';
+      } else if (!data.floci_ok) {
+        badge.className = 'drift-badge unk';
+        badge.textContent = 'STARTING';
+      } else {
+        badge.className = 'drift-badge unk';
+        badge.textContent = 'NOT STARTED';
+      }
+    }
+
+    async function refreshDemo3Catalog() {
+      try {
+        const r = await fetch('/api/demo/3/catalog');
+        const j = await r.json();
+        if (!j.ok) return;
+        const cur = document.getElementById('demo3Current');
+        const box = document.getElementById('demo3Catalog');
+        if (j.data.last_service) cur.textContent = j.data.last_service;
+        if (j.data.services && j.data.services.length) {
+          box.innerHTML = 'Services in catalog: ' + j.data.services.map(s =>
+            `<span style="margin-right:.5rem">${s.name} <span style="color:${s.argocd.includes('Healthy')?'#22c55e':'#94a3b8'}">(${s.argocd})</span></span>`
+          ).join('');
+        }
+      } catch (_) {}
+    }
+
+    async function refreshDriftPanel() {
+      try {
+        const r = await fetch('/api/demo/4/status');
+        const j = await r.json();
+        if (j.ok) renderDriftPanel(j.data);
+      } catch (_) { /* optional panel */ }
+    }
+
+    function clearLog() { logEl.innerHTML = ''; log('Log cleared.'); }
+
+    function setBusy(v, label = '') {
+      busy = v;
+      const badge = document.getElementById('liveBadge');
+      const dot = document.getElementById('pulseDot');
+      const overlay = document.getElementById('overlay');
+      const progress = document.getElementById('progressWrap');
+      const nowRun = document.getElementById('nowRunning');
+      document.querySelectorAll('.action-btn, .step-btn').forEach(b => b.disabled = v);
+
+      if (v) {
+        badge.textContent = 'Running step…';
+        badge.className = 'badge busy';
+        dot.className = 'pulse-dot busy';
+        overlay.classList.add('show');
+        document.getElementById('overlayText').textContent = label || 'Running...';
+        progress.classList.add('show');
+        nowRun.classList.add('show');
+        document.getElementById('nowRunningText').textContent = label || 'Executing...';
+      } else {
+        badge.textContent = 'Ready for demo';
+        badge.className = 'badge';
+        dot.className = 'pulse-dot';
+        overlay.classList.remove('show');
+        progress.classList.remove('show');
+        nowRun.classList.remove('show');
+        document.querySelectorAll('.action-btn.running').forEach(b => b.classList.remove('running'));
+      }
+    }
+
+    function showResult(label, ok, data) {
+      const box = document.getElementById('resultBox');
+      const main = document.getElementById('resultMain');
+      const jobs = document.getElementById('jobList');
+      const link = document.getElementById('openLink');
+      box.classList.add('show');
+      jobs.innerHTML = '';
+
+      if (data.drift) {
+        main.textContent = 'Settings changed outside Git';
+        main.className = 'result-main err';
+        addJob(jobs, `${formatAcl(data.desired_acl)} → ${formatAcl(data.actual_acl)}`, 'failure');
+        if (data.violation) addJob(jobs, data.violation, 'failure');
+        if (data.cost_delta_usd) addJob(jobs, `Estimated extra cost ~$${data.cost_delta_usd}/month`, 'failure');
+        renderDriftPanel(data);
+      } else if (data.reconciled) {
+        main.textContent = 'Restored to match Git';
+        main.className = 'result-main ok';
+        addJob(jobs, `Now running: ${formatAcl(data.actual_acl)}`, 'success');
+        renderDriftPanel(data);
+      } else if (data.phase === 'baseline') {
+        main.textContent = 'Secure baseline set';
+        main.className = 'result-main ok';
+        addJob(jobs, 'Storage is private and encrypted per Git definition', 'success');
+        renderDriftPanel(data);
+      } else if (data.phase === 'scaffold') {
+        main.textContent = 'New app: ' + (data.service || '');
+        main.className = 'result-main ok';
+        addJob(jobs, 'App bundle created with monitoring and pipelines', 'success');
+        addJob(jobs, 'Next: Submit for review → Go live', 'running');
+      } else if (data.pr_number && isOnboardingAction(label)) {
+        main.textContent = 'Review request #' + data.pr_number + ' opened';
+        main.className = 'result-main ok';
+        addJob(jobs, (data.service || 'app') + ' — automated checks running', 'running');
+        addJob(jobs, 'After approval on GitHub, click Go live', 'success');
+      } else if (data.pr_number) {
+        main.textContent = 'Change request #' + data.pr_number + ' opened';
+        main.className = 'result-main ok';
+        addJob(jobs, 'Security scans running on GitHub', 'running');
+      } else if (data.phase === 'deploy') {
+        main.textContent = data.already_live ? 'Already live' : 'Published';
+        main.className = 'result-main ok';
+        addJob(jobs, 'Deployment status: ' + (data.argocd || 'in progress'), data.argocd && data.argocd.includes('Healthy') ? 'success' : 'running');
+      } else if (data.bucket) {
+        renderDriftPanel(data);
+      } else if (data.conclusion === 'in_progress') { main.textContent = 'Checks still running…'; main.className = 'result-main run'; }
+      else if (data.conclusion) {
+        const blockOk = isBlockAction(label) && data.conclusion === 'failure';
+        const passOk = isPassAction(label) && data.conclusion === 'success';
+        main.textContent = data.conclusion === 'success' ? 'Checks passed' : (data.conclusion === 'failure' ? 'Checks failed' : data.conclusion);
+        main.className = 'result-main ' + ((blockOk || passOk || data.conclusion === 'success') ? 'ok' : (data.conclusion === 'failure' && !blockOk ? 'err' : 'run'));
+      } else if (data.argocd) { main.textContent = 'Deployment: ' + data.argocd; main.className = 'result-main ' + (data.argocd.includes('Healthy') ? 'ok' : 'run'); }
+      else if (data.health && data.health !== 'unreachable') { main.textContent = 'App is healthy'; main.className = 'result-main ok'; }
+      else if (data.pr_number) {
+        const blockOk = isBlockAction(label) && data.conclusion === 'failure';
+        const passOk = isPassAction(label) && data.conclusion === 'success';
+        main.textContent = 'Change #' + data.pr_number + ' — ' + (data.conclusion === 'success' ? 'passed' : data.conclusion === 'failure' ? 'failed' : 'running');
+        main.className = 'result-main ' + ((blockOk || passOk) ? 'ok' : (data.conclusion === 'in_progress' ? 'run' : 'err'));
+      }
+      else { main.textContent = ok ? 'Step complete' : 'Done'; main.className = 'result-main ok'; }
+
+      if (data.jobs) {
+        data.jobs.forEach(j => {
+          const row = document.createElement('div');
+          row.className = 'job-row';
+          const c = j.conclusion || 'running';
+          row.innerHTML = `<span>${j.name}</span><span class="job-badge ${c}">${c}</span>`;
+          jobs.appendChild(row);
+        });
+      }
+      if (data.findings) {
+        data.findings.slice(0,3).forEach(f => {
+          const row = document.createElement('div');
+          row.className = 'job-row';
+          row.innerHTML = `<span style="font-size:.7rem">${f.slice(0,60)}...</span><span class="job-badge failure">alert</span>`;
+          jobs.appendChild(row);
+        });
+      }
+
+      const url = data.open_url || data.url;
+      if (url && !url.includes('/drift')) {
+        link.href = url; link.style.display = 'inline-block';
+        link.textContent = 'Open ' + (url.includes('github') ? 'on GitHub' : 'details') + ' →';
+      } else link.style.display = 'none';
+    }
+
+    function addJob(jobs, text, badge) {
+      const row = document.createElement('div');
+      row.className = 'job-row';
+      row.innerHTML = `<span>${text}</span><span class="job-badge ${badge}">${badge}</span>`;
+      jobs.appendChild(row);
+    }
+
+    async function refreshStatus() {
+      try {
+        const r = await fetch('/api/status');
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error);
+        const grid = document.getElementById('statusGrid');
+        grid.innerHTML = '';
+        const labels = {
+          dashboard:'App dashboard', health:'API health', idp:'Developer portal',
+          argocd:'Deployments', grafana:'Monitoring', fastapi_staging:'Staging app', demo_api:'Sample service'
+        };
+        Object.entries(j.data).forEach(([k, v]) => {
+          const ok = v === 'ok' || (String(v).includes('Synced') && String(v).includes('Healthy'));
+          const warn = String(v).includes('OutOfSync') || String(v).includes('Degraded');
+          const card = document.createElement('div');
+          card.className = 'stat-card';
+          card.innerHTML = `
+            <div class="stat-icon ${ok ? 'ok' : warn ? 'warn' : v==='fail' ? 'fail' : 'warn'}">${ok ? 'OK' : warn ? '!' : '—'}</div>
+            <div><div class="stat-label">${labels[k]||k}</div><div class="stat-val">${v}</div></div>`;
+          grid.appendChild(card);
+        });
+        document.getElementById('liveBadge').textContent = 'Ready for demo';
+        log('Health check complete — all systems reviewed.', 'ok');
+        return true;
+      } catch (e) {
+        document.getElementById('liveBadge').textContent = 'Not ready';
+        document.getElementById('pulseDot').className = 'pulse-dot err';
+        log('Health check failed: ' + e.message, 'err');
+        return false;
+      }
+    }
+
+    async function run(method, path, label, btn) {
+      if (busy) return false;
+      if (btn) btn.classList.add('running');
+      setBusy(true, label);
+      log(DEMO_INTRO[label] || ('Starting ' + label + '…'), 'info');
+      let success = false;
+      try {
+        const r = await fetch(path, { method });
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error || 'Request failed');
+        success = true;
+        const driftStep = isDriftAction(label);
+
+        logClientOutcome(label, j.data);
+
+        if (driftStep && j.data.actual_acl) {
+          log(`Compare · Git wants ${formatAcl(j.data.desired_acl)} · running ${formatAcl(j.data.actual_acl)}`, j.data.in_sync ? 'ok' : 'drift');
+        }
+        if (j.data.log) logScriptHighlights(j.data.log);
+        if (j.data.jobs) j.data.jobs.forEach(jb => log('  ' + jb.name + ': ' + jb.conclusion, jb.conclusion === 'success' ? 'ok' : ''));
+        if (j.data.pods) log('Pods: ' + j.data.pods.replace(/\n/g, ' | '));
+        if (j.data.findings) j.data.findings.forEach(f => log('  ' + f, 'info'));
+        showResult(label, true, j.data);
+        if (driftStep) renderDriftPanel(j.data);
+        if (isOnboardingAction(label)) {
+          if (j.data.service) document.getElementById('demo3Current').textContent = j.data.service;
+          await refreshDemo3Catalog();
+        }
+        await refreshStatus();
+      } catch (e) {
+        log(label + ' failed: ' + e.message, 'err');
+        showResult(label, false, { conclusion: 'error' });
+        document.getElementById('resultMain').textContent = e.message;
+        document.getElementById('resultMain').className = 'result-main err';
+      } finally {
+        if (btn) btn.classList.remove('running');
+        setBusy(false);
+        if (activeStep >= 0 && stepEls[activeStep]) {
+          stepEls[activeStep].classList.remove('running', 'active-ring');
+          stepEls[activeStep].classList.add(success ? 'done' : 'fail');
+        }
+      }
+      return success;
+    }
+
+    async function runGuided(i) {
+      if (busy) return;
+      activeStep = i;
+      stepEls.forEach((el, idx) => {
+        el.classList.remove('active-ring', 'running');
+        if (idx === i) { el.classList.add('active-ring', 'running'); }
+      });
+      await GUIDED[i].fn();
+    }
+
+    initGuided();
+    log('Welcome — use the guided walkthrough or pick any scenario below.', 'ok');
+    refreshStatus();
+    refreshDriftPanel();
+    refreshDemo3Catalog();
+    setInterval(refreshDriftPanel, 25000);
+  </script>
+</body>
+</html>
