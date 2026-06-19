@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: svc-20260611105645-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+    app: svc-20260611105645
+data:
+  svc-20260611105645-overview.json: |
+    {
+      "title": "svc-20260611105645 Overview",
+      "uid": "svc-20260611105645-overview",
+      "tags": ["enlight-lab", "svc-20260611105645"],
+      "timezone": "browser",
+      "panels": [
+        {
+          "title": "Pod CPU",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "targets": [{"expr": "rate(container_cpu_usage_seconds_total{pod=~\"svc-20260611105645.*\"}[5m])"}]
+        },
+        {
+          "title": "Pod Memory",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "targets": [{"expr": "container_memory_working_set_bytes{pod=~\"svc-20260611105645.*\"}"}]
+        },
+        {
+          "title": "Health Check",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 8},
+          "targets": [{"expr": "up{job=\"svc-20260611105645\"}"}]
+        }
+      ],
+      "schemaVersion": 38,
+      "version": 1
+    }

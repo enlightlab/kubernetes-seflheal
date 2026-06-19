@@ -1,0 +1,29 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: enlight-require-limits
+  annotations:
+    policies.kyverno.io/title: Require CPU and memory limits
+    policies.kyverno.io/category: Enlight Lab Governance
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: require-limits
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [enlight-staging]
+      validate:
+        message: "Each container must set cpu/memory requests and limits."
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  requests:
+                    memory: "?*"
+                    cpu: "?*"
+                  limits:
+                    memory: "?*"
+                    cpu: "?*"

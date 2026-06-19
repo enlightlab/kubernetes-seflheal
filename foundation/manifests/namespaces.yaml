@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: enlight-staging
+  labels:
+    app.kubernetes.io/part-of: enlight-lab
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: enlight-prod
+  labels:
+    app.kubernetes.io/part-of: enlight-lab

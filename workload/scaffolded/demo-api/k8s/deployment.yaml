@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-api
+  namespace: enlight-staging
+  labels:
+    app: demo-api
+    app.kubernetes.io/part-of: enlight-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-api
+  template:
+    metadata:
+      labels:
+        app: demo-api
+        team: enlight-demo
+    spec:
+      containers:
+        - name: api
+          image: enlight-fastapi:demo-pass
+          imagePullPolicy: Never
+          envFrom:
+            - secretRef:
+                name: demo-api-secrets
+          ports:
+            - containerPort: 8000
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi

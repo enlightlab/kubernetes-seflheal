@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-api-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+    app: demo-api
+data:
+  demo-api-overview.json: |
+    {
+      "title": "demo-api Overview",
+      "uid": "demo-api-overview",
+      "tags": ["enlight-lab", "demo-api"],
+      "timezone": "browser",
+      "panels": [
+        {
+          "title": "Pod CPU",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "targets": [{"expr": "rate(container_cpu_usage_seconds_total{pod=~\"demo-api.*\"}[5m])"}]
+        },
+        {
+          "title": "Pod Memory",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "targets": [{"expr": "container_memory_working_set_bytes{pod=~\"demo-api.*\"}"}]
+        },
+        {
+          "title": "Health Check",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 8},
+          "targets": [{"expr": "up{job=\"demo-api\"}"}]
+        }
+      ],
+      "schemaVersion": 38,
+      "version": 1
+    }

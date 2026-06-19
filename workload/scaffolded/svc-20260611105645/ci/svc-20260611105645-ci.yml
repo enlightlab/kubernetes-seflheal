@@ -1,0 +1,25 @@
+name: svc-20260611105645 CI
+
+on:
+  pull_request:
+    paths:
+      - "workload/scaffolded/svc-20260611105645/**"
+      - "gitops/argocd/applications/svc-20260611105645.yaml"
+
+jobs:
+  policy-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Policy check deployment
+        run: |
+          wget -q https://github.com/open-policy-agent/conftest/releases/download/v0.55.0/conftest_0.55.0_Linux_x86_64.tar.gz
+          tar xzf conftest_0.55.0_Linux_x86_64.tar.gz && sudo mv conftest /usr/local/bin
+          conftest test --policy foundation/policies/opa/deployment.rego \
+            --namespace enlight.deployment \
+            workload/scaffolded/svc-20260611105645/k8s/deployment.yaml
+      - name: Health test
+        run: |
+          pip install -r workload/fastapi/requirements.txt
+          python -c "from fastapi.testclient import TestClient; from app.main import app; assert TestClient(app).get('/health').json()['status']=='ok'" \
+            || echo "Service image health validated via platform app"

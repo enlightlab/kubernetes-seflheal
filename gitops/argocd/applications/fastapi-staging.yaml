@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: fastapi-staging
+  namespace: argocd
+spec:
+  project: enlight-lab
+  source:
+    repoURL: https://github.com/kirtiprasad2003/enlight-lab-platform.git
+    targetRevision: main
+    path: demos/demo2-chat-to-deploy/overlays/local
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: enlight-staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

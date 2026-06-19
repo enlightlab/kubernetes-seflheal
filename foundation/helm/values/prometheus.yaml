@@ -1,0 +1,12 @@
+grafana:
+  adminPassword: enlight-admin
+  service:
+    type: ClusterIP
+
+prometheus:
+  prometheusSpec:
+    retention: 2d
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi

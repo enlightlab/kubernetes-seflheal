@@ -1,0 +1,29 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: svc-20260611105645-alerts
+  namespace: monitoring
+  labels:
+    release: monitoring
+    app: svc-20260611105645
+spec:
+  groups:
+    - name: svc-20260611105645.rules
+      rules:
+        - alert: svc-20260611105645Down
+          expr: up{job="svc-20260611105645"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            service: svc-20260611105645
+          annotations:
+            summary: "svc-20260611105645 is down"
+            description: "No healthy targets for svc-20260611105645 in enlight-staging"
+        - alert: svc-20260611105645HighMemory
+          expr: container_memory_working_set_bytes{pod=~"svc-20260611105645.*"} > 100000000
+          for: 5m
+          labels:
+            severity: warning
+            service: svc-20260611105645
+          annotations:
+            summary: "svc-20260611105645 high memory"

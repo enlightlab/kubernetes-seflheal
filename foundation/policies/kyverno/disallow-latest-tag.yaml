@@ -1,0 +1,23 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: enlight-disallow-latest
+  annotations:
+    policies.kyverno.io/title: Disallow latest image tag
+    policies.kyverno.io/category: Enlight Lab Governance
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: disallow-latest
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [enlight-staging]
+      validate:
+        message: "Using image tag 'latest' is not allowed in enlight-staging."
+        pattern:
+          spec:
+            containers:
+              - image: "!*:latest"

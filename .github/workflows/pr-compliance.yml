@@ -1,0 +1,82 @@
+name: PR Compliance Bot
+
+on:
+  pull_request:
+    paths:
+      - "demos/**"
+      - "foundation/**"
+      - "workload/**"
+      - ".github/workflows/**"
+
+jobs:
+  compliance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install conftest
+        run: |
+          wget -q https://github.com/open-policy-agent/conftest/releases/download/v0.55.0/conftest_0.55.0_Linux_x86_64.tar.gz
+          tar xzf conftest_0.55.0_Linux_x86_64.tar.gz
+          sudo mv conftest /usr/local/bin
+
+      - name: Secret scan (changed Python files)
+        run: |
+          set -e
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          mapfile -t changed < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep '\.py$' || true)
+          if [ ${#changed[@]} -eq 0 ]; then
+            echo "No Python files changed in this PR"
+          fi
+          for f in "${changed[@]}"; do
+            [ -f "$f" ] || continue
+            echo "Checking $f"
+            if grep -qiE '(api[_-]?key|password)\s*=\s*"[^"]{8,}"' "$f"; then
+              echo "::error::SEC-001 Hardcoded secret in $f"
+              exit 1
+            fi
+          done
+          echo "Secret scan passed"
+
+      - name: Terraform S3 policy (changed files)
+        run: |
+          set -e
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          mapfile -t changed < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep '\.tf$' || true)
+          if [ ${#changed[@]} -eq 0 ]; then
+            echo "No Terraform files changed in this PR"
+          fi
+          for f in "${changed[@]}"; do
+            [ -f "$f" ] || continue
+            echo "Checking $f"
+            if grep -q 'public-read' "$f"; then
+              echo "::error::S3-001 Public bucket in $f"
+              exit 1
+            fi
+          done
+          echo "Terraform policy passed"
+
+      - name: K8s manifest policy (if changed)
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          for f in $(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -E '\.(yaml|yml)$' | grep -E 'k8s|overlays' || true); do
+            [ -f "$f" ] || continue
+            conftest test --policy foundation/policies/opa/deployment.rego --namespace enlight.deployment "$f" || exit 1
+          done
+          echo "PR compliance checks passed"
+
+      - name: Evidence artifact
+        if: always()
+        run: |
+          echo '{"pr":"${{ github.event.pull_request.number }}","repo":"${{ github.repository }}","status":"checked"}' > compliance-evidence.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compliance-evidence
+          path: compliance-evidence.json

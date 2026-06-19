@@ -1,0 +1,12 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: demo-api
+  description: Enlight Lab golden-path FastAPI service
+  annotations:
+    github.com/project-slug: kirtiprasad2003/enlight-lab-platform
+spec:
+  type: service
+  lifecycle: production
+  owner: enlight-demo
+  system: enlight-lab

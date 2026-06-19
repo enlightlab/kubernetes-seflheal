@@ -1,0 +1,29 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: demo-api-alerts
+  namespace: monitoring
+  labels:
+    release: monitoring
+    app: demo-api
+spec:
+  groups:
+    - name: demo-api.rules
+      rules:
+        - alert: demo-apiDown
+          expr: up{job="demo-api"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            service: demo-api
+          annotations:
+            summary: "demo-api is down"
+            description: "No healthy targets for demo-api in enlight-staging"
+        - alert: demo-apiHighMemory
+          expr: container_memory_working_set_bytes{pod=~"demo-api.*"} > 100000000
+          for: 5m
+          labels:
+            severity: warning
+            service: demo-api
+          annotations:
+            summary: "demo-api high memory"

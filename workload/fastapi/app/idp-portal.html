@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Enlight IDP — Developer Portal</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root { --bg:#050810; --card:#0f172a; --border:#334155; --text:#f1f5f9; --muted:#94a3b8; --blue:#3b82f6; --green:#22c55e; --purple:#a855f7; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { font-family:Inter,system-ui,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+    .wrap { max-width:1000px; margin:0 auto; padding:2rem 1.25rem; }
+    header { display:flex; justify-content:space-between; align-items:center; margin-bottom:2rem; flex-wrap:wrap; gap:1rem; }
+    h1 { font-size:1.6rem; font-weight:700; }
+    .badge { background:rgba(59,130,246,.15); color:#93c5fd; padding:.35rem .75rem; border-radius:999px; font-size:.8rem; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+    @media(max-width:700px){ .grid{ grid-template-columns:1fr; } }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:1.25rem; }
+    .card h2 { font-size:1rem; margin-bottom:.75rem; color:#e2e8f0; }
+    .item { padding:.75rem; border:1px solid var(--border); border-radius:8px; margin-bottom:.5rem; display:flex; justify-content:space-between; align-items:center; gap:.5rem; }
+    .item small { color:var(--muted); display:block; margin-top:.2rem; }
+    .tag { font-size:.7rem; padding:.2rem .5rem; border-radius:4px; background:#1e293b; color:var(--muted); }
+    .tag.live { background:rgba(34,197,94,.15); color:var(--green); }
+    .template { border-color:#4c1d95; background:linear-gradient(135deg,rgba(76,29,149,.2),rgba(15,23,42,.9)); }
+    .btn { display:inline-block; margin-top:1rem; padding:.65rem 1rem; background:var(--blue); color:#fff; text-decoration:none; border-radius:8px; font-weight:600; font-size:.9rem; }
+    .steps { margin-top:1rem; }
+    .steps li { margin:.4rem 0; color:var(--muted); font-size:.9rem; }
+    code { background:#1e293b; padding:.15rem .4rem; border-radius:4px; font-size:.85rem; }
+    a { color:#93c5fd; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Enlight IDP</h1>
+        <p style="color:var(--muted);margin-top:.25rem">Developer portal — catalog, golden paths, agent-driven PRs</p>
+      </div>
+      <span class="badge">Backstage-equivalent · Local</span>
+    </header>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Service catalog</h2>
+        <div class="item">
+          <div>
+            <strong>fastapi</strong>
+            <small>Enlight Lab core API · enlight-staging</small>
+          </div>
+          <span class="tag live">Live</span>
+        </div>
+        <div class="item">
+          <div>
+            <strong>demo-api</strong>
+            <small>Golden-path scaffold · PR → ArgoCD</small>
+          </div>
+          <span class="tag">Scaffolded</span>
+        </div>
+        <p style="color:var(--muted);font-size:.85rem;margin-top:.75rem">
+          Production: full <a href="https://backstage.io" target="_blank">Backstage</a> catalog with ownership graph.
+        </p>
+      </section>
+
+      <section class="card template">
+        <h2>Golden path template</h2>
+        <p style="font-size:.9rem;color:#c4b5fd;margin-bottom:.75rem"><strong>fastapi-service</strong> — policy + observability pre-wired</p>
+        <ul style="font-size:.85rem;color:var(--muted);line-height:1.6;padding-left:1.1rem">
+          <li>catalog-info.yaml</li>
+          <li>K8s deployment + service + limits</li>
+          <li>ServiceMonitor + alerts + Grafana dashboard</li>
+          <li>Secrets wiring (ExternalSecrets in prod)</li>
+          <li>Terraform + CI + ArgoCD app</li>
+        </ul>
+        <a class="btn" href="/">← Platform dashboard</a>
+      </section>
+    </div>
+
+    <section class="card" style="margin-top:1rem">
+      <h2>Agent flow (paste to Cursor)</h2>
+      <ol class="steps">
+        <li><code>Run demo 3 full flow scaffold demo-api</code> — scaffold + open PR</li>
+        <li>Merge PR on GitHub → ArgoCD provisions service</li>
+        <li><code>Run demo 3 deploy demo-api</code> — sync to cluster (if needed)</li>
+        <li><code>Run demo 3 runbook scale-up demo-api</code> — ops via PR</li>
+        <li><code>Run demo 3 investigate demo-api</code> — incident fix via PR</li>
+      </ol>
+      <p style="color:var(--muted);font-size:.85rem;margin-top:.75rem">
+        Every state change is a <strong>reviewable PR</strong> — not manual kubectl.
+      </p>
+    </section>
+  </div>
+</body>
+</html>

@@ -1,0 +1,28 @@
+{
+    "timestamp":  "2026-06-09T15:32:26.6738662+05:30",
+    "variant":  "non-compliant",
+    "demo":  "demo5-pr-compliance",
+    "merge_allowed":  false,
+    "controls":  [
+                     {
+                         "description":  "No hardcoded secrets",
+                         "id":  "SEC-001",
+                         "pass":  false
+                     },
+                     {
+                         "description":  "No GitHub tokens in code",
+                         "id":  "SEC-002",
+                         "pass":  true
+                     },
+                     {
+                         "description":  "No public S3 buckets",
+                         "id":  "S3-001",
+                         "pass":  false
+                     },
+                     {
+                         "description":  "S3 encryption required",
+                         "id":  "S3-002",
+                         "pass":  false
+                     }
+                 ]
+}

@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: demo-api
+  namespace: argocd
+spec:
+  project: enlight-lab
+  source:
+    repoURL: https://github.com/kirtiprasad2003/enlight-lab-platform.git
+    targetRevision: main
+    path: workload/scaffolded/demo-api/k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: enlight-staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

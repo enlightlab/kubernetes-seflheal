@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: enlight-staging
+
+resources:
+  - ../../../../workload/fastapi/k8s/base
+
+images:
+  - name: PLACEHOLDER_IMAGE
+    newName: enlight-fastapi
+    newTag: demo-pass
+
+patches:
+  - target:
+      kind: Deployment
+      name: fastapi
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Never

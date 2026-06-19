@@ -1,0 +1,11 @@
+# Apply during manager demo to show live Kyverno block
+apiVersion: v1
+kind: Pod
+metadata:
+  name: policy-violation-demo
+  namespace: enlight-staging
+spec:
+  containers:
+    - name: bad
+      image: nginx:latest
+      resources: {}

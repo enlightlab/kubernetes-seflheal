@@ -1,0 +1,15 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: svc-20260611105645
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: svc-20260611105645
+  endpoints:
+    - port: http
+      path: /health
+      interval: 30s

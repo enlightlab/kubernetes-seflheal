@@ -1,81 +1,78 @@
 # Kube Self-Heal Demo
 
-Standalone web app for the **outage response** story only: simulate a failure, explain it with **k8sgpt**, then recover with **GitOps** (ArgoCD).
-
-No other demos (release safety, cloud guard, onboarding, etc.) — built for a focused manager presentation.
+Standalone web app for the **outage response** story: simulate a failure, explain it with **k8sgpt**, then recover with **GitOps** (ArgoCD). Built for client demos on **Oracle OKE** and local **kind**.
 
 ## What it does
 
 | Step | Button | What happens |
 |------|--------|--------------|
-| 1 | Simulate outage | Sets a bad container image; staging app goes unhealthy |
-| 2 | Explain with AI | Runs `k8sgpt analyze --namespace enlight-staging` |
-| 3 | Auto-fix app | Applies known-good manifest + re-enables ArgoCD self-heal |
+| 1 | Simulate outage | Scales app down or injects failure (instant mode) |
+| 2 | Explain with AI | Runs `k8sgpt analyze` on the staging namespace |
+| 3 | Auto-fix app | Restores good deployment + re-enables ArgoCD sync |
 
 **Golden rule:** AI explains. GitOps fixes. Two separate clicks.
 
-## Prerequisites
+## Oracle OKE (production demo)
 
-1. **Kubernetes cluster** from the main platform (one-time setup):
+| Item | Value |
+|------|-------|
+| Demo UI | `http://<selfheal-ui-LB-IP>/` |
+| Staging app | `http://<selfheal-ui-LB-IP>/staging/` |
+| Deploy | `deploy/oci/README.md` |
+| Terraform | `infra/oci/` |
 
-   ```bat
-   cd D:\enlight-lab-platform
-   scripts\go-live.bat
-   ```
+```bash
+# Cloud Shell
+kubectl apply -f deploy/k8s/selfheal-ui.yaml
+kubectl -n selfheal get svc selfheal-ui
+```
 
-   This creates `kind-enlight-lab` with `enlight-staging` and ArgoCD.
+Build and push image:
 
-2. **k8sgpt** installed and on PATH (for step 2).
+```powershell
+cd D:\devops-selfheal
+docker build --platform linux/amd64 -f deploy/Dockerfile -t bom.ocir.io/<tenancy>/selfheal-ui:latest .
+docker push bom.ocir.io/<tenancy>/selfheal-ui:latest
+```
 
-3. **Python 3.10+** (UI server).
-
-## Quick start
+## Local kind (development)
 
 ```bat
 cd D:\devops-selfheal
-
-REM Port-forwards (app :30800, ArgoCD :8082)
 go-live.bat
-
-REM In a second terminal — web UI on :30901
 start-selfheal-ui.bat
 ```
 
-Open **http://localhost:30901** in your browser.
+Open **http://localhost:30901**
 
 ## Project layout
 
 ```
 devops-selfheal/
-├── go-live.bat              # Port-forwards only
-├── start-selfheal-ui.bat    # Launch web UI
-├── scripts/
-│   ├── go-live.ps1
-│   ├── start-selfheal-ui.ps1
-│   ├── port-forward-all.ps1
-│   └── stop-port-forwards.ps1
-└── web/
-    ├── server.py            # FastAPI routes
-    ├── actions.py           # kubectl + k8sgpt logic
-    └── static/index.html    # Client-facing UI
+├── web/                 # FastAPI demo UI (actions.py, static/)
+├── deploy/
+│   ├── Dockerfile
+│   ├── k8s/             # selfheal-ui, staging-app, ArgoCD app
+│   └── oci/             # OKE deploy + fix scripts
+├── infra/oci/           # Terraform (VCN, OKE, OCIR)
+├── scripts/             # Local port-forwards
+└── demos/               # Enlight Lab platform demos (legacy in repo)
 ```
 
 ## Configuration
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `ENLIGHT_LAB_ROOT` | `D:\enlight-lab-platform` | Path to heal overlay (`demos/demo2-chat-to-deploy/overlays/local`) |
+See `deploy/oci/env.example` and `deploy/k8s/selfheal-ui.yaml` ConfigMap.
 
-## Links during demo
-
-- **Demo UI:** http://localhost:30901
-- **App health:** http://localhost:30800/health
-- **ArgoCD app:** http://localhost:8082/applications/argocd/fastapi-staging
-
-## Relation to full platform
-
-This project reuses the same cluster and manifests as `D:\enlight-lab-platform` but exposes only Demo 1 through a dedicated UI. The full five-demo control panel remains at http://localhost:30900 in the main repo.
+| Variable | Purpose |
+|----------|---------|
+| `OUTAGE_MODE` | `instant` (default), `crash`, or `image` |
+| `GOOD_IMAGE` / `BAD_IMAGE` | OCIR image refs for heal / break |
+| `DEPLOY_TARGET` | `oci` or `local` |
 
 ## Azure DevOps
 
-This folder aligns with the `devops-selfheal` repo on Azure DevOps. Initialize git here when ready to push.
+Repo: https://dev.azure.com/enlight-lab/devops/_git/devops-selfheal
+
+## Relation to enlight-lab-platform
+
+This repo also contains the broader **Enlight Lab** demo platform under `demos/`, `workload/`, etc. The **self-heal client demo** lives in `web/` + `deploy/` at the repo root.

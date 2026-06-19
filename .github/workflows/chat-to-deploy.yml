@@ -1,0 +1,63 @@
+name: Chat to Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: compliant or non-compliant manifest
+        required: true
+        type: choice
+        options:
+          - compliant
+          - non-compliant
+      image_tag:
+        description: Image tag for compliant deploy
+        default: demo-pass
+        type: string
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r workload/fastapi/requirements.txt httpx
+      - name: Health endpoint test
+        run: |
+          cd workload/fastapi
+          python -c "
+          from fastapi.testclient import TestClient
+          from app.main import app
+          assert TestClient(app).get('/health').json() == {'status': 'ok'}
+          "
+
+  policy-check:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install conftest
+        run: |
+          wget -q https://github.com/open-policy-agent/conftest/releases/download/v0.55.0/conftest_0.55.0_Linux_x86_64.tar.gz
+          tar xzf conftest_0.55.0_Linux_x86_64.tar.gz
+          sudo mv conftest /usr/local/bin
+      - name: Render and validate manifest
+        run: |
+          kubectl kustomize demos/demo2-chat-to-deploy/overlays/${{ inputs.variant }} > /tmp/manifest.yaml
+          cat /tmp/manifest.yaml
+          conftest test --policy foundation/policies/opa/deployment.rego --namespace enlight.deployment /tmp/manifest.yaml
+
+  build-and-deploy:
+    needs: policy-check
+    if: inputs.variant == 'compliant'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t enlight-fastapi:${{ inputs.image_tag }} workload/fastapi
+      - name: Deploy summary
+        run: |
+          echo "Ready for ArgoCD sync: fastapi-staging" >> $GITHUB_STEP_SUMMARY
+          echo "Image tag: ${{ inputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
