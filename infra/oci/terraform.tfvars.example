@@ -1,0 +1,21 @@
+# ──────────────────────────────────────────────
+# Copy this to terraform.tfvars and fill in your values.
+# DO NOT commit terraform.tfvars to git (it has secrets).
+# ──────────────────────────────────────────────
+
+# Find these in OCI Console → Profile → Tenancy / User Settings
+
+tenancy_ocid     = "ocid1.tenancy.oc1..aaaaaaa..."       # Profile → Tenancy → OCID
+user_ocid        = "ocid1.user.oc1..aaaaaaa..."           # Profile → User Settings → OCID
+fingerprint      = "aa:bb:cc:dd:..."                      # API Keys section
+private_key_path = "~/.oci/oci_api_key.pem"               # Path to downloaded .pem file
+region           = "ap-mumbai-1"
+compartment_ocid = "ocid1.tenancy.oc1..aaaaaaa..."        # Same as tenancy for root compartment
+
+# Cluster config (defaults are fine for demo)
+cluster_name       = "selfheal-demo"
+kubernetes_version = "v1.31.1"
+node_shape         = "VM.Standard.E4.Flex"
+node_ocpus         = 1
+node_memory_gb     = 8
+node_count         = 2

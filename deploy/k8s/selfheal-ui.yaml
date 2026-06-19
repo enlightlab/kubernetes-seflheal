@@ -1,0 +1,163 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: selfheal
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: selfheal-ui
+  namespace: selfheal
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: selfheal-demo
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "patch", "update", "create", "delete"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["get", "list", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: selfheal-demo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: selfheal-demo
+subjects:
+  - kind: ServiceAccount
+    name: selfheal-ui
+    namespace: selfheal
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: selfheal-ui-config
+  namespace: selfheal
+data:
+  DEPLOY_TARGET: "oci"
+  IN_CLUSTER: "true"
+  USE_PORT_FORWARD: "false"
+  NAMESPACE: "enlight-staging"
+  ARGOCD_NAMESPACE: "argocd"
+  ARGOCD_APP: "fastapi-staging"
+  DEPLOYMENT_NAME: "fastapi"
+  CONTAINER_NAME: "api"
+  POD_LABEL: "app=fastapi"
+  BAD_IMAGE: "bom.ocir.io/bmitpaosivqx/enlight-fastapi:DOES-NOT-EXIST"
+  GOOD_IMAGE: "bom.ocir.io/bmitpaosivqx/enlight-fastapi:demo-pass"
+  APP_HEALTH_CHECK_URL: "http://fastapi.enlight-staging.svc.cluster.local/health"
+  APP_DASHBOARD_CHECK_URL: "http://fastapi.enlight-staging.svc.cluster.local"
+  ARGOCD_CHECK_URL: "http://argocd-server.argocd.svc.cluster.local"
+  # Leave empty — UI discovers LoadBalancer IPs automatically
+  PUBLIC_APP_HEALTH_URL: ""
+  PUBLIC_APP_DASHBOARD_URL: ""
+  PUBLIC_ARGOCD_URL: ""
+  PUBLIC_ARGOCD_APP_URL: ""
+  HEAL_OVERLAY_PATH: "/app/deploy/k8s/staging-heal"
+  STAGING_APP_PATH: "/app/deploy/k8s/staging-app"
+  OUTAGE_MODE: "instant"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: selfheal-ui
+  namespace: selfheal
+  labels:
+    app: selfheal-ui
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: selfheal-ui
+  template:
+    metadata:
+      labels:
+        app: selfheal-ui
+    spec:
+      serviceAccountName: selfheal-ui
+      containers:
+        - name: ui
+          image: bom.ocir.io/bmitpaosivqx/selfheal-ui:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 30901
+          envFrom:
+            - configMapRef:
+                name: selfheal-ui-config
+          env:
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: k8sgpt-ai
+                  key: openai-api-key
+                  optional: true
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: k8sgpt-ai
+                  key: anthropic-api-key
+                  optional: true
+          readinessProbe:
+            tcpSocket:
+              port: 30901
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            tcpSocket:
+              port: 30901
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 5
+          startupProbe:
+            tcpSocket:
+              port: 30901
+            initialDelaySeconds: 3
+            periodSeconds: 3
+            failureThreshold: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: selfheal-ui
+  namespace: selfheal
+spec:
+  type: LoadBalancer
+  selector:
+    app: selfheal-ui
+  ports:
+    - name: http
+      port: 80
+      targetPort: 30901

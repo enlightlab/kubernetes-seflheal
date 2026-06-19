@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: fastapi
+  namespace: enlight-staging
+spec:
+  # ClusterIP avoids a 3rd OCI load balancer (free tier often allows only 2).
+  # Browser access: http://<selfheal-ui-EXTERNAL-IP>/staging/health
+  type: ClusterIP
+  selector:
+    app: fastapi
+  ports:
+    - port: 80
+      targetPort: 8000

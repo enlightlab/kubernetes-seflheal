@@ -1,0 +1,13 @@
+# Demo-only: full permissions so Auto-fix can patch deployments and pause ArgoCD.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: selfheal-ui-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: selfheal-ui
+    namespace: selfheal

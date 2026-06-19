@@ -1,0 +1,33 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: fastapi-staging
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kirtiprasad2003/enlight-lab-platform.git
+    targetRevision: main
+    path: demos/demo2-chat-to-deploy/overlays/oci
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: enlight-staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+  # Demo breaks image via kubectl during Simulate outage; ignore so steady-state stays Synced after heal.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      name: fastapi
+      jsonPointers:
+        - /spec/template/spec/containers/0/image
+    # Kustomize adds managed-by labels; live svc may lack them until sync runs.
+    - kind: Service
+      name: fastapi
+      jsonPointers:
+        - /metadata/labels
+        - /spec/clusterIP
