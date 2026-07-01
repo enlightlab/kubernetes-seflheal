@@ -1,9 +1,10 @@
 (() => {
   const SUGGESTIONS = [
-    'What is wrong with fastapi in enlight-staging right now?',
-    'Summarize pod health for a client in 3 sentences.',
-    'Is the staging outage still active or recovered?',
-    'What image is the fastapi deployment using?',
+    'Is my pod healthy?',
+    'What image is fastapi using?',
+    'Is the outage recovered?',
+    'Investigate root cause of the staging failure',
+    'Summarize cluster health for a client in 3 sentences',
   ];
 
   const messagesEl = document.getElementById('holmesMessages');
@@ -11,19 +12,43 @@
   const input = document.getElementById('holmesInput');
   const sendBtn = document.getElementById('holmesSend');
   const statusBadge = document.getElementById('holmesStatus');
+  const activityEl = document.getElementById('holmesActivity');
+  const activityTitle = document.getElementById('activityTitle');
+  const activityDetail = document.getElementById('activityDetail');
+  const activityTime = document.getElementById('activityTime');
   let busy = false;
+  let activityTimer = null;
+  let activityStart = 0;
 
   function esc(s) {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
-  function appendMsg(role, text, extra) {
+  function formatReply(text) {
+    let s = esc(text);
+    s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/`([^`]+)`/g, '<code class="holmes-inline-code">$1</code>');
+    s = s.replace(/^- (.+)$/gm, '<li>$1</li>');
+    if (s.includes('<li>')) s = '<ul class="holmes-ul">' + s + '</ul>';
+    s = s.replace(/\n\n/g, '</p><p>');
+    if (!s.startsWith('<ul') && !s.startsWith('<p')) s = '<p>' + s + '</p>';
+    return s;
+  }
+
+  function appendMsg(role, text, meta) {
     const wrap = document.createElement('div');
     wrap.className = `holmes-msg holmes-msg--${role}`;
     const label = role === 'user' ? 'You' : role === 'error' ? 'Error' : 'HolmesGPT';
+    const source = meta?.source
+      ? `<span class="holmes-source holmes-source--${meta.source}">${meta.source === 'telemetry' ? 'Live telemetry' : 'Holmes deep scan'}</span>`
+      : '';
+    const model = meta?.model ? `<span class="holmes-msg-meta">${esc(meta.model)}</span>` : '';
     wrap.innerHTML = `
-      <div class="holmes-msg-label">${label}</div>
-      <div class="holmes-msg-body">${esc(text).replace(/\n/g, '<br>')}${extra || ''}</div>
+      <div class="holmes-msg-head">
+        <span class="holmes-msg-label">${label}</span>
+        ${source}${model}
+      </div>
+      <div class="holmes-msg-body">${role === 'error' ? esc(text) : formatReply(text)}</div>
     `;
     messagesEl.appendChild(wrap);
     messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -33,35 +58,77 @@
     busy = on;
     sendBtn.disabled = on;
     input.disabled = on;
-    statusBadge.textContent = on ? 'Holmes thinking…' : 'Holmes ready';
+    statusBadge.textContent = on ? 'Holmes working…' : 'Holmes ready';
     statusBadge.className = 'badge' + (on ? ' warn' : '');
   }
 
-  async function loadConfig() {
+  function showActivity(title, detail) {
+    activityEl.hidden = false;
+    activityTitle.textContent = title || 'Working…';
+    activityDetail.textContent = detail || '';
+    if (!activityStart) {
+      activityStart = Date.now();
+      activityTimer = setInterval(() => {
+        const sec = Math.floor((Date.now() - activityStart) / 1000);
+        activityTime.textContent = sec + 's';
+      }, 1000);
+    }
+  }
+
+  function hideActivity() {
+    activityEl.hidden = true;
+    activityStart = 0;
+    if (activityTimer) clearInterval(activityTimer);
+    activityTimer = null;
+    activityTime.textContent = '0s';
+  }
+
+  function renderHealth(d) {
+    const healthy = !!d.healthy;
+    const card = document.getElementById('healthCard');
+    const pip = document.getElementById('healthPip');
+    const title = document.getElementById('healthTitle');
+    const sub = document.getElementById('healthSub');
+    card.className = 'holmes-health-card' + (healthy ? ' holmes-health-card--ok' : ' holmes-health-card--bad');
+    pip.className = 'holmes-health-pip' + (healthy ? ' holmes-health-pip--ok' : ' holmes-health-pip--bad');
+    title.textContent = healthy ? 'Staging is healthy' : 'Staging needs attention';
+    sub.textContent = d.pod_line || 'No pod data';
+    document.getElementById('argoPills').innerHTML = [
+      `<span class="holmes-pill holmes-pill--sync">${esc(d.argocd_sync || '—')}</span>`,
+      `<span class="holmes-pill holmes-pill--health">${esc(d.argocd_health || '—')}</span>`,
+    ].join('');
+    document.getElementById('metaNs').textContent = d.namespace || '—';
+    document.getElementById('metaDep').textContent = d.deployment || '—';
+    document.getElementById('metaImage').textContent = d.image_short || d.image || '—';
+    document.getElementById('metaPod').textContent = d.pod_line || '—';
+    document.getElementById('metaModel').textContent = d.model || '—';
+  }
+
+  async function loadSnapshot() {
     try {
-      const j = await (await fetch('/api/config')).json();
-      if (!j.ok) return;
-      const d = j.data || {};
-      document.getElementById('metaNs').textContent = d.namespace || '—';
-      document.getElementById('metaDep').textContent = 'fastapi';
-      document.getElementById('metaModel').textContent = d.holmes_model || '—';
-      if (!d.holmes_enabled) {
+      const r = await fetch('/api/holmes/snapshot');
+      const text = await r.text();
+      let j;
+      try { j = JSON.parse(text); } catch (_) {
+        throw new Error('Server returned non-JSON — try refreshing or check the UI pod');
+      }
+      if (!j.ok) throw new Error(j.error || 'Snapshot failed');
+      renderHealth(j.data);
+      if (!j.data.holmes_enabled) {
         statusBadge.textContent = 'Holmes disabled';
         statusBadge.className = 'badge err';
         document.getElementById('holmesFootnote').textContent =
-          'HolmesGPT is off — set HOLMES_ENABLED=true and a Gemini key on the cluster.';
+          'HolmesGPT is off on the cluster — set HOLMES_ENABLED=true and Gemini key.';
         sendBtn.disabled = true;
       } else {
         statusBadge.textContent = 'Holmes ready';
+        statusBadge.className = 'badge';
       }
-    } catch (_) { /* ignore */ }
-
-    try {
-      const j = await (await fetch('/api/status')).json();
-      if (j.ok && j.data) {
-        document.getElementById('metaPod').textContent = j.data.pod || '—';
-      }
-    } catch (_) { /* ignore */ }
+    } catch (e) {
+      statusBadge.textContent = 'Snapshot error';
+      statusBadge.className = 'badge err';
+      document.getElementById('healthSub').textContent = String(e.message || e);
+    }
   }
 
   function renderSuggestions() {
@@ -77,38 +144,85 @@
     });
   }
 
+  async function streamChat(msg) {
+    const resp = await fetch('/api/holmes/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg }),
+    });
+    if (!resp.ok || !resp.body) {
+      const t = await resp.text();
+      if (t.trim().startsWith('<')) {
+        throw new Error(
+          'Gateway timeout (HTML response). The connection was cut — deep scans use SSE now; redeploy the latest UI image and retry.'
+        );
+      }
+      throw new Error('Stream failed (HTTP ' + resp.status + ')');
+    }
+
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    let result = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split('\n\n');
+      buf = parts.pop() || '';
+      for (const block of parts) {
+        const line = block.trim();
+        if (!line.startsWith('data:')) continue;
+        let data;
+        try { data = JSON.parse(line.slice(5).trim()); } catch (_) { continue; }
+        if (data.type === 'step' && data.step) {
+          showActivity(data.step.title, data.step.detail);
+        } else if (data.type === 'ping') {
+          showActivity(activityTitle.textContent, activityDetail.textContent || 'Still working…');
+        } else if (data.type === 'complete') {
+          result = data.data;
+        } else if (data.type === 'error') {
+          throw new Error(data.error);
+        }
+      }
+    }
+    return result;
+  }
+
   async function sendMessage(text) {
     const msg = String(text || '').trim();
     if (!msg || busy) return;
     appendMsg('user', msg);
     input.value = '';
     setBusy(true);
-    const thinking = document.createElement('div');
-    thinking.className = 'holmes-msg holmes-msg--bot holmes-msg--thinking';
-    thinking.innerHTML = '<div class="holmes-msg-label">HolmesGPT</div><div class="holmes-msg-body"><span class="holmes-dots">Investigating cluster</span></div>';
-    messagesEl.appendChild(thinking);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    showActivity('Starting', 'Connecting to cluster…');
 
     try {
-      const r = await fetch('/api/holmes/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: msg }),
-      });
-      const j = await r.json();
-      thinking.remove();
-      if (j.ok && j.data?.ok) {
-        const model = j.data.model ? `<div class="holmes-msg-meta">Model: ${esc(j.data.model)}</div>` : '';
-        appendMsg('bot', j.data.reply || '(empty reply)', model);
-        if (j.data.context?.pod_line) {
-          document.getElementById('metaPod').textContent = j.data.context.pod_line;
-        }
+      const data = await streamChat(msg);
+      hideActivity();
+      if (data?.ok) {
+        appendMsg('bot', data.reply || '(empty reply)', {
+          source: data.source,
+          model: data.model,
+        });
+        if (data.context) renderHealth({
+          healthy: data.context.healthy,
+          pod_line: data.context.pod_line,
+          namespace: data.context.namespace,
+          deployment: data.context.deployment,
+          image: data.context.image,
+          image_short: (data.context.image || '').split('/').pop(),
+          argocd_sync: data.context.argocd_sync,
+          argocd_health: data.context.argocd_health,
+          model: data.model,
+          holmes_enabled: true,
+        });
       } else {
-        const err = j.error || j.data?.error || 'HolmesGPT request failed';
-        appendMsg('error', err);
+        appendMsg('error', data?.error || 'HolmesGPT could not complete the request');
       }
     } catch (e) {
-      thinking.remove();
+      hideActivity();
       appendMsg('error', String(e.message || e));
     } finally {
       setBusy(false);
@@ -128,6 +242,9 @@
     }
   });
 
+  document.getElementById('btnRefreshSnap').addEventListener('click', loadSnapshot);
+
   renderSuggestions();
-  loadConfig();
+  loadSnapshot();
+  setInterval(loadSnapshot, 45000);
 })();

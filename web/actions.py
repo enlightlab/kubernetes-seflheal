@@ -1536,7 +1536,121 @@ def _run_holmes_investigation(ctx: dict) -> tuple[bool, str, str]:
     return _run_holmes_cli(ctx)
 
 
-def holmes_chat(message: str) -> dict:
+def holmes_snapshot() -> dict:
+    """Live cluster facts for the Holmes chat sidebar (no LLM)."""
+    ctx = _incident_context()
+    tree = _argocd_app_tree(ctx)
+    healthy = _staging_is_healthy(ctx)
+    return {
+        "ok": True,
+        "healthy": healthy,
+        "holmes_enabled": cfg.HOLMES_ENABLED,
+        "model": cfg.resolved_holmes_model(),
+        "namespace": cfg.NAMESPACE,
+        "deployment": cfg.DEPLOYMENT_NAME,
+        "image": ctx.get("image", ""),
+        "image_short": (ctx.get("image") or "").split("/")[-1],
+        "pod_line": ctx.get("pod_line", ""),
+        "pod_name": ctx.get("pod_name", ""),
+        "pod_reason": ctx.get("pod_reason", ""),
+        "replicas": ctx.get("replicas", -1),
+        "ready_replicas": ctx.get("ready_replicas", 0),
+        "argocd_sync": tree.get("sync_status", "Unknown"),
+        "argocd_health": tree.get("health_status", "Unknown"),
+        "tree_summary": tree.get("tree_summary", ""),
+    }
+
+
+def _holmes_cluster_facts(ctx: dict, tree: dict) -> str:
+    return "\n".join([
+        f"namespace: {cfg.NAMESPACE}",
+        f"deployment: {cfg.DEPLOYMENT_NAME}",
+        f"image: {ctx.get('image') or 'unknown'}",
+        f"pod: {ctx.get('pod_line') or 'none'}",
+        f"pod_reason: {ctx.get('pod_reason') or 'none'}",
+        f"replicas_ready: {ctx.get('ready_replicas', 0)}/{ctx.get('replicas', -1)}",
+        f"staging_healthy: {_staging_is_healthy(ctx)}",
+        f"argocd_sync: {tree.get('sync_status', 'Unknown')}",
+        f"argocd_health: {tree.get('health_status', 'Unknown')}",
+    ])
+
+
+def _try_holmes_fast_answer(message: str, ctx: dict, tree: dict) -> str | None:
+    """Instant accurate answers from live kubectl — no LLM latency."""
+    q = message.lower().strip()
+    healthy = _staging_is_healthy(ctx)
+    image = ctx.get("image") or "unknown"
+    image_short = image.split("/")[-1]
+    pod_line = ctx.get("pod_line") or "no pods"
+    sync = tree.get("sync_status", "Unknown")
+    argo_health = tree.get("health_status", "Unknown")
+    ready = ctx.get("ready_replicas", 0)
+    replicas = ctx.get("replicas", -1)
+
+    if re.match(r"^(hi|hello|hey)\b", q):
+        status = "healthy and running" if healthy else "not fully healthy"
+        return (
+            f"Hello! I'm HolmesGPT on **{cfg.NAMESPACE}**. Right now fastapi looks **{status}**.\n\n"
+            f"- **Pod:** {pod_line}\n"
+            f"- **Image:** `{image_short}`\n"
+            f"- **Argo CD:** {sync} / {argo_health}\n\n"
+            "Ask me to investigate deeper, summarize for a client, or explain an outage."
+        )
+
+    health_q = any(w in q for w in ("healthy", "health", "running", "status", " up", "down"))
+    deep_q = any(w in q for w in ("why", "wrong", "broke", "fix", "investigate", "explain", "root cause"))
+    if health_q and not deep_q:
+        if healthy:
+            return (
+                "**Yes — your staging pod looks healthy.**\n\n"
+                f"- **Pod:** {pod_line}\n"
+                f"- **Image:** `{image}`\n"
+                f"- **Replicas ready:** {ready}/{replicas}\n"
+                f"- **Argo CD:** {sync} / {argo_health}\n\n"
+                "This answer uses **live kubectl state** (not stale warning events). "
+                "Ask a follow-up if you want a deeper Holmes investigation."
+            )
+        reason = ctx.get("pod_reason") or "not ready"
+        return (
+            "**No — the staging workload is not healthy.**\n\n"
+            f"- **Pod:** {pod_line}\n"
+            f"- **Likely issue:** {reason}\n"
+            f"- **Image:** `{image}`\n"
+            f"- **Argo CD:** {sync} / {argo_health}\n\n"
+            "Say *investigate the outage* for a full HolmesGPT RCA."
+        )
+
+    if "image" in q and any(w in q for w in ("what", "which", "tag", "using")):
+        return f"The deployment is using:\n\n`{image}`\n\n**Pod snapshot:** {pod_line}"
+
+    if any(w in q for w in ("argo", "gitops", "sync")):
+        return (
+            f"**Argo CD app `{cfg.ARGOCD_APP}`**\n\n"
+            f"- **Sync:** {sync}\n"
+            f"- **Health:** {argo_health}\n"
+            f"- **Namespace:** {cfg.NAMESPACE}\n\n"
+            f"{tree.get('tree_summary', '')}"
+        )
+
+    if any(w in q for w in ("recovered", "outage", "still broken", "still down")):
+        if healthy:
+            return (
+                "**Recovery looks complete.** The current pod is Running and replicas are ready.\n\n"
+                f"- {pod_line}\n"
+                f"- Argo CD: {sync} / {argo_health}\n\n"
+                "Older ErrImagePull events may still appear in history — ignore them unless the **current** pod is failing."
+            )
+        return (
+            "**Outage still active** on the live workload.\n\n"
+            f"- {pod_line}\n"
+            f"- Issue: {ctx.get('pod_reason') or 'unknown'}\n\n"
+            "Run **Auto-fix** on the guided demo or ask me to investigate root cause."
+        )
+
+    return None
+
+
+def holmes_chat(message: str, on_step: StepCallback = None) -> dict:
     """Free-form HolmesGPT Q&A — separate from the guided demo Step 3."""
     text = (message or "").strip()
     if not text:
@@ -1549,27 +1663,68 @@ def holmes_chat(message: str) -> dict:
     if not ok_cluster:
         raise RuntimeError(cluster_msg)
 
+    def step(title: str, detail: str = "", phase: str = "cluster") -> None:
+        if on_step:
+            on_step({"title": title, "detail": detail, "phase": phase})
+
+    step("Reading live cluster state", f"namespace {cfg.NAMESPACE}", "cluster")
     ctx = _incident_context()
+    tree = _argocd_app_tree(ctx)
+    healthy = _staging_is_healthy(ctx)
+
+    step("Checking telemetry", "Argo CD + pod status", "cluster")
+    fast = _try_holmes_fast_answer(text, ctx, tree)
+    if fast:
+        step("Answer ready", "Live cluster telemetry (instant)", "done")
+        return {
+            "ok": True,
+            "reply": fast,
+            "error": "",
+            "source": "telemetry",
+            "model": cfg.resolved_holmes_model(),
+            "context": {
+                "namespace": cfg.NAMESPACE,
+                "deployment": cfg.DEPLOYMENT_NAME,
+                "image": ctx.get("image", ""),
+                "pod_line": ctx.get("pod_line", ""),
+                "healthy": healthy,
+                "argocd_sync": tree.get("sync_status"),
+                "argocd_health": tree.get("health_status"),
+            },
+            "raw": "",
+        }
+
+    step("Running HolmesGPT deep scan", "Agentic RCA — read-only kubectl", "ai")
     chat_steps = int(os.environ.get("HOLMES_CHAT_MAX_STEPS", "8"))
+    facts = _holmes_cluster_facts(ctx, tree)
     prompt = (
-        f"{text}\n\n"
-        f"Cluster context (read-only): namespace {cfg.NAMESPACE}, deployment {cfg.DEPLOYMENT_NAME}, "
-        f"image {ctx.get('image') or 'unknown'}, pods {ctx.get('pod_line') or 'none'}. "
-        "Use kubectl read-only. Reply in plain English for a client demo."
+        f"User question: {text}\n\n"
+        f"LIVE CLUSTER FACTS (authoritative — trust over stale events):\n{facts}\n\n"
+        "If facts show staging_healthy: true, state clearly the app is healthy. "
+        "Use at most 2 read-only kubectl commands only if facts are insufficient. "
+        "Reply in plain English with sections: **Status**, **Evidence**, **Recommendation**."
     )
     holmes_ok, reply, raw = _run_holmes_cli_prompt(prompt, max_steps=chat_steps)
     model = cfg.resolved_holmes_model()
+    step(
+        "HolmesGPT complete" if holmes_ok else "HolmesGPT could not finish",
+        (reply[:100] + "…") if holmes_ok and len(reply) > 100 else (reply or _holmes_detail_snippet(raw)),
+        "done" if holmes_ok else "error",
+    )
     return {
         "ok": holmes_ok,
         "reply": reply if holmes_ok else "",
         "error": "" if holmes_ok else _holmes_detail_snippet(raw, 400),
+        "source": "holmes",
         "model": model,
         "context": {
             "namespace": cfg.NAMESPACE,
             "deployment": cfg.DEPLOYMENT_NAME,
             "image": ctx.get("image", ""),
             "pod_line": ctx.get("pod_line", ""),
-            "healthy": _staging_is_healthy(ctx),
+            "healthy": healthy,
+            "argocd_sync": tree.get("sync_status"),
+            "argocd_health": tree.get("health_status"),
         },
         "raw": raw[-2000:] if raw else "",
     }

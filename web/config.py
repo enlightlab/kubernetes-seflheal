@@ -169,7 +169,7 @@ def runtime_info() -> dict[str, str | bool]:
         "auto_deploy_on_load": AUTO_DEPLOY_ON_LOAD,
         "holmes_enabled": HOLMES_ENABLED,
         "holmes_mode": HOLMES_MODE,
-        "holmes_model": HOLMES_MODEL,
+        "holmes_model": resolved_holmes_model() if HOLMES_ENABLED else HOLMES_MODEL,
         "holmes_http_url": HOLMES_HTTP_URL,
         **demo_credentials(),
     }

@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from actions import (
@@ -16,6 +16,7 @@ from actions import (
     deploy_application,
     explain_with_ai,
     holmes_chat,
+    holmes_snapshot,
     platform_status,
     reset_staging,
     resolved_argocd_credentials,
@@ -164,6 +165,27 @@ async def api_holmes_chat(request: Request) -> JSONResponse:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/holmes/snapshot")
+async def api_holmes_snapshot() -> JSONResponse:
+    try:
+        loop = asyncio.get_running_loop()
+        data = await loop.run_in_executor(_status_pool, holmes_snapshot)
+        return JSONResponse({"ok": True, "data": data})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/holmes/chat/stream")
+async def api_holmes_chat_stream(request: Request) -> StreamingResponse:
+    body = await request.json()
+    message = str(body.get("message", "")).strip()
+
+    def action(on_step):
+        return holmes_chat(message, on_step=on_step)
+
+    return stream_demo_action(action)
 
 
 @app.post("/api/deploy/stream")

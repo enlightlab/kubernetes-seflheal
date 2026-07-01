@@ -1,0 +1,24 @@
+# Optional ingress for selfheal.enlightlab.com — long timeouts for HolmesGPT chat SSE.
+# Apply if traffic goes through nginx ingress (not direct LoadBalancer).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: selfheal-ui-ingress
+  namespace: selfheal
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: "8m"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: selfheal.enlightlab.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: selfheal-ui
+                port:
+                  number: 80
