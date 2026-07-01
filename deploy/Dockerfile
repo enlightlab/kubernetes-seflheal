@@ -1,14 +1,24 @@
-FROM --platform=linux/amd64 python:3.12-slim-bookworm
+FROM python:3.12-slim-bookworm
 
 ARG KUBECTL_VERSION=v1.31.4
 ARG K8SGPT_VERSION=0.4.33
+ARG TARGETARCH=amd64
 
-RUN apt-get update \
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+      amd64) K8SGPT_ARCH=x86_64 ;; \
+      arm64) K8SGPT_ARCH=arm64 ;; \
+      *) K8SGPT_ARCH=x86_64 ;; \
+    esac; \
+    apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
-    && curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" -o /usr/local/bin/kubectl \
+    && curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors \
+        "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${TARGETARCH}/kubectl" \
+        -o /usr/local/bin/kubectl \
     && chmod +x /usr/local/bin/kubectl \
-    && curl -fsSL "https://github.com/k8sgpt-ai/k8sgpt/releases/download/v${K8SGPT_VERSION}/k8sgpt_Linux_x86_64.tar.gz" \
-       | tar -xz -C /usr/local/bin k8sgpt \
+    && curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors \
+        "https://github.com/k8sgpt-ai/k8sgpt/releases/download/v${K8SGPT_VERSION}/k8sgpt_Linux_${K8SGPT_ARCH}.tar.gz" \
+        | tar -xz -C /usr/local/bin k8sgpt \
     && chmod +x /usr/local/bin/k8sgpt \
     && apt-get purge -y curl \
     && apt-get autoremove -y \

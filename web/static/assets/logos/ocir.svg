@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="OCIR">
+  <rect x="1" y="1" width="22" height="22" rx="4" fill="#312D2A"/>
+  <path fill="#F80000" d="M6 8h4v8H6V8zm8 0h4v8h-4V8z"/>
+  <text x="12" y="6.5" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-size="4.5" font-weight="700">OCIR</text>
+</svg>

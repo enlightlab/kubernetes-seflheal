@@ -1,8 +1,8 @@
 # Deploy self-heal demo to Oracle OKE
 # Prerequisites: kubectl connected to OKE, docker logged into bom.ocir.io
 param(
-    [string]$OcirUser = "enlightlab/kirti@enlightlab.com",
-    [string]$OcirRegistry = "bom.ocir.io/enlightlab"
+    [string]$OcirUser = "bmitpaosivqx/kirti@enlightlab.com",
+    [string]$OcirRegistry = "bom.ocir.io/bmitpaosivqx"
 )
 
 $ErrorActionPreference = "Stop"

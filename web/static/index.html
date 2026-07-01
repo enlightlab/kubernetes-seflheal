@@ -3,869 +3,154 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>EnlightLab — Kube Self-Heal Demo</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <style>
-    :root {
-      --blue: #2563eb;
-      --blue-hover: #1d4ed8;
-      --blue-light: #eff6ff;
-      --bg: #ffffff;
-      --surface: #f9fafb;
-      --border: #e5e7eb;
-      --text: #111827;
-      --muted: #4b5563;
-      --muted-light: #6b7280;
-      --green: #059669;
-      --green-bg: #ecfdf5;
-      --red: #dc2626;
-      --red-bg: #fef2f2;
-      --amber: #d97706;
-      --amber-bg: #fffbeb;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html { height: 100%; }
-    body {
-      font-family: Inter, system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100%;
-      line-height: 1.5;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .topbar {
-      border-bottom: 1px solid var(--border);
-      background: var(--bg);
-      padding: .85rem 1.5rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 1rem;
-    }
-    .wordmark {
-      display: flex;
-      align-items: center;
-      gap: .55rem;
-      font-size: 1.05rem;
-      font-weight: 700;
-      color: var(--text);
-      letter-spacing: -.02em;
-    }
-    .wordmark img { height: 28px; width: auto; }
-    .topbar-actions { display: flex; align-items: center; gap: .65rem; }
-    .ghost-btn {
-      font-family: inherit;
-      font-size: .82rem;
-      font-weight: 600;
-      color: var(--blue);
-      background: transparent;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: .45rem .85rem;
-      cursor: pointer;
-      text-decoration: none;
-    }
-    .ghost-btn:hover { border-color: var(--blue); background: var(--blue-light); }
-
-    .wrap { max-width: 1080px; margin: 0 auto; padding: 2.5rem 1.25rem 2rem; flex: 1; width: 100%; }
-
-    .hero {
-      text-align: center;
-      margin-bottom: 2rem;
-    }
-    .hero h1 {
-      font-size: clamp(1.75rem, 4vw, 2.35rem);
-      font-weight: 800;
-      letter-spacing: -.03em;
-      line-height: 1.15;
-      margin-bottom: .85rem;
-    }
-    .hero h1 .accent { color: var(--blue); }
-    .hero .lead {
-      max-width: 620px;
-      margin: 0 auto 1.25rem;
-      color: var(--muted);
-      font-size: 1rem;
-    }
-
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      gap: .35rem;
-      font-size: .78rem;
-      font-weight: 600;
-      padding: .35rem .75rem;
-      border-radius: 999px;
-      background: var(--green-bg);
-      color: var(--green);
-      border: 1px solid #a7f3d0;
-    }
-    .badge.busy { background: var(--amber-bg); color: var(--amber); border-color: #fde68a; }
-    .badge.err { background: var(--red-bg); color: var(--red); border-color: #fecaca; }
-
-    .links {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: .5rem;
-      margin-bottom: 1.5rem;
-    }
-    .links a {
-      font-size: .8rem;
-      font-weight: 500;
-      color: var(--blue);
-      text-decoration: none;
-      padding: .45rem .8rem;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--bg);
-    }
-    .links a:hover { background: var(--blue-light); border-color: #bfdbfe; }
-
-    .status-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: .85rem;
-      margin-bottom: 1.5rem;
-    }
-    @media (max-width: 720px) { .status-grid { grid-template-columns: 1fr; } }
-    .stat-card {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 1rem 1.1rem;
-      min-height: 88px;
-      display: flex;
-      align-items: flex-start;
-      gap: .75rem;
-      overflow: hidden;
-    }
-    .stat-body { min-width: 0; flex: 1; }
-    .stat-icon {
-      width: 36px; height: 36px; border-radius: 10px;
-      display: grid; place-items: center;
-      font-size: .7rem; font-weight: 800; flex-shrink: 0;
-    }
-    .stat-icon.ok { background: var(--green-bg); color: var(--green); }
-    .stat-icon.fail { background: var(--red-bg); color: var(--red); }
-    .stat-icon.warn { background: var(--amber-bg); color: var(--amber); }
-    .stat-label {
-      font-size: .7rem; color: var(--muted-light);
-      text-transform: uppercase; letter-spacing: .06em; font-weight: 600;
-    }
-    .stat-val {
-      font-size: .95rem; font-weight: 700; margin-top: .2rem; color: var(--text);
-      line-height: 1.35;
-    }
-    .stat-detail {
-      font-size: .72rem; color: var(--muted-light); margin-top: .2rem;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-      max-width: 100%;
-    }
-
-    .cluster-alert {
-      display: none;
-      background: var(--red-bg);
-      border: 1px solid #fecaca;
-      border-radius: 12px;
-      padding: .85rem 1rem;
-      margin-bottom: 1rem;
-      font-size: .88rem;
-      color: var(--red);
-      line-height: 1.5;
-    }
-    .cluster-alert.show { display: block; }
-    .cluster-alert strong { color: var(--text); }
-
-    .layout { display: grid; grid-template-columns: 1fr 340px; gap: 1.25rem; }
-    @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
-
-    .card {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 1.35rem 1.4rem;
-      margin-bottom: 1rem;
-      box-shadow: 0 1px 2px rgba(17, 24, 39, .04);
-    }
-    .card.featured { background: var(--surface); }
-    .card h2 {
-      font-size: 1.05rem;
-      font-weight: 700;
-      margin-bottom: .45rem;
-      color: var(--text);
-    }
-    .card p {
-      font-size: .88rem;
-      color: var(--muted);
-      line-height: 1.6;
-      margin-bottom: 1rem;
-    }
-    .card p strong { color: var(--text); font-weight: 600; }
-
-    .how-it-works {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: .75rem;
-      margin-bottom: 1.25rem;
-    }
-    @media (max-width: 700px) { .how-it-works { grid-template-columns: 1fr; } }
-    .flow-step {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 1rem .85rem;
-      text-align: center;
-    }
-    .flow-step .num {
-      width: 28px; height: 28px; border-radius: 50%;
-      background: var(--blue); color: #fff;
-      display: grid; place-items: center;
-      font-size: .75rem; font-weight: 700;
-      margin: 0 auto .55rem;
-    }
-    .flow-step.done { border-color: #86efac; background: var(--green-bg); }
-    .flow-step.done .num { background: var(--green); }
-    .flow-step.running { border-color: #93c5fd; background: var(--blue-light); }
-    .flow-step.running .num { background: var(--amber); }
-    .flow-step.fail { border-color: #fca5a5; background: var(--red-bg); }
-    .flow-step.fail .num { background: var(--red); }
-    .flow-step .lbl { font-size: .82rem; font-weight: 700; color: var(--text); }
-    .flow-step .hint { font-size: .72rem; color: var(--muted-light); margin-top: .25rem; }
-
-    .action-row { display: flex; flex-wrap: wrap; gap: .55rem; }
-    .action-btn {
-      font-family: inherit;
-      font-size: .84rem;
-      font-weight: 600;
-      cursor: pointer;
-      padding: .65rem 1.1rem;
-      border-radius: 8px;
-      border: 1px solid transparent;
-      transition: background .15s, border-color .15s;
-      display: inline-flex;
-      align-items: center;
-      gap: .35rem;
-    }
-    .action-btn:hover:not(:disabled) { filter: none; }
-    .action-btn:disabled { opacity: .5; cursor: not-allowed; }
-    .action-btn.primary {
-      background: var(--blue);
-      color: #fff;
-    }
-    .action-btn.primary:hover:not(:disabled) { background: var(--blue-hover); }
-    .action-btn.outline {
-      background: var(--bg);
-      color: var(--red);
-      border-color: #fecaca;
-    }
-    .action-btn.outline:hover:not(:disabled) { background: var(--red-bg); }
-    .action-btn.secondary {
-      background: var(--bg);
-      color: var(--muted);
-      border-color: var(--border);
-    }
-    .action-btn.secondary:hover:not(:disabled) { background: var(--surface); }
-    .action-btn.running::after {
-      content: '';
-      width: 12px; height: 12px;
-      border: 2px solid rgba(255,255,255,.35);
-      border-top-color: #fff;
-      border-radius: 50%;
-      animation: spin .7s linear infinite;
-    }
-    .action-btn.outline.running::after,
-    .action-btn.secondary.running::after {
-      border-color: rgba(37,99,235,.25);
-      border-top-color: var(--blue);
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    .live-panel {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 1.25rem;
-      position: sticky;
-      top: 1rem;
-      box-shadow: 0 1px 2px rgba(17, 24, 39, .04);
-      min-width: 0;
-      overflow: hidden;
-    }
-    .live-panel h2 {
-      font-size: .95rem;
-      font-weight: 700;
-      margin-bottom: .85rem;
-      color: var(--text);
-    }
-    .result-box {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: .85rem;
-      margin-bottom: .85rem;
-      min-height: 72px;
-      display: none;
-      overflow: hidden;
-      max-width: 100%;
-    }
-    .result-box.show { display: block; }
-    .result-title {
-      font-size: .68rem;
-      color: var(--muted-light);
-      text-transform: uppercase;
-      letter-spacing: .05em;
-      font-weight: 600;
-      margin-bottom: .4rem;
-    }
-    .result-main {
-      font-size: .92rem; font-weight: 700; margin-bottom: .5rem; color: var(--text);
-      line-height: 1.45;
-      overflow-wrap: anywhere;
-      word-break: break-word;
-    }
-    .result-main.ok { color: var(--green); }
-    .result-main.err { color: var(--red); }
-    .findings-list {
-      display: flex;
-      flex-direction: column;
-      gap: .4rem;
-      max-height: 220px;
-      overflow-y: auto;
-      overflow-x: hidden;
-      padding-right: .15rem;
-    }
-    .finding {
-      font-size: .78rem;
-      line-height: 1.5;
-      padding: .55rem .65rem;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-left: 3px solid var(--amber);
-      border-radius: 8px;
-      color: var(--text);
-      overflow-wrap: anywhere;
-      word-break: break-word;
-      max-width: 100%;
-    }
-    .finding.tip {
-      border-left-color: var(--blue);
-      background: var(--blue-light);
-      color: var(--text);
-    }
-    .open-link {
-      display: inline-block;
-      margin-top: .45rem;
-      font-size: .78rem;
-      color: var(--blue);
-      text-decoration: none;
-      font-weight: 600;
-    }
-    .open-link:hover { text-decoration: underline; }
-    .log {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: .7rem;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: .68rem;
-      color: var(--muted);
-      height: 200px;
-      overflow-y: auto;
-      overflow-x: hidden;
-    }
-    .log div {
-      margin-bottom: .25rem;
-      line-height: 1.45;
-      overflow-wrap: anywhere;
-      word-break: break-word;
-    }
-    .log .ok { color: var(--green); font-weight: 600; }
-    .log .err { color: var(--red); font-weight: 600; }
-    .log .info { color: var(--blue); }
-
-    .overlay {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(17, 24, 39, .35);
-      z-index: 100;
-      align-items: center;
-      justify-content: center;
-    }
-    .overlay.show { display: flex; }
-    .overlay-card {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 1.75rem 2rem;
-      text-align: center;
-      min-width: 280px;
-      box-shadow: 0 20px 40px rgba(17, 24, 39, .12);
-    }
-    .overlay-card p { font-size: .92rem; font-weight: 600; color: var(--text); }
-    .spinner {
-      width: 36px; height: 36px;
-      margin: 0 auto .85rem;
-      border: 3px solid var(--blue-light);
-      border-top-color: var(--blue);
-      border-radius: 50%;
-      animation: spin .8s linear infinite;
-    }
-
-    .site-footer {
-      margin-top: auto;
-      border-top: 1px solid var(--border);
-      background: var(--surface);
-      padding: 1.1rem 1.5rem;
-    }
-    .footer-inner {
-      max-width: 1080px;
-      margin: 0 auto;
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      justify-content: space-between;
-      gap: .75rem 1.25rem;
-      font-size: .8rem;
-      color: var(--muted-light);
-    }
-    .footer-brand {
-      display: flex;
-      align-items: center;
-      gap: .5rem;
-      font-weight: 700;
-      color: var(--text);
-      font-size: .85rem;
-    }
-    .footer-brand span { color: var(--blue); }
-    .footer-meta { display: flex; flex-wrap: wrap; gap: .35rem 1rem; align-items: center; }
-    .footer-meta a {
-      color: var(--blue);
-      text-decoration: none;
-      font-weight: 500;
-    }
-    .footer-meta a:hover { text-decoration: underline; }
-    .footer-copy { font-size: .75rem; color: var(--muted-light); }
-  </style>
+  <title>EnlightLab — Kubernetes Self-Heal Platform</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
-  <div class="overlay" id="overlay">
-    <div class="overlay-card">
-      <div class="spinner"></div>
-      <p id="overlayText">Working...</p>
-    </div>
-  </div>
+  <div class="page-bg" aria-hidden="true"></div>
 
   <header class="topbar">
-    <div class="wordmark">
-      <img src="/static/assets/company-logo.png" alt="EnlightLab" onerror="this.style.display='none'" />
-      <span>EnlightLab</span>
-    </div>
+    <a class="wordmark" href="/">
+      <img src="/static/assets/company-logo.png" alt="" onerror="this.style.display='none'" />
+      EnlightLab
+    </a>
     <div class="topbar-actions">
-      <span class="badge" id="liveBadge">Checking...</span>
-      <a class="ghost-btn" id="linkGitOps" href="#" target="_blank">Open GitOps</a>
+      <a class="ghost-btn" href="/staging/">View staging app</a>
+      <a class="ghost-btn" href="/holmes">HolmesGPT chat</a>
+      <a class="cta-btn" href="/demo">Start guided demo →</a>
     </div>
   </header>
 
   <div class="wrap">
     <section class="hero">
-      <h1>Recover from outages with <span class="accent">AI explain</span> + GitOps</h1>
+      <div class="eyebrow" style="justify-content:center">Production self-healing for Kubernetes</div>
+      <h1>Deploy, break, explain, and <span class="accent">recover</span> — live on Kubernetes</h1>
       <p class="lead">
-        Simulate a staging failure, let AI explain what went wrong, then restore the app with one click — all from your browser.
+        A client-ready demo: deploy a FastAPI app with GitOps, simulate a real outage,
+        let AI explain what failed, then restore with one click. Integrates with ArgoCD,
+        k8sgpt, and Slack for your team's workflows.
       </p>
+      <div class="hero-actions">
+        <a class="ghost-btn" href="/staging/">View live staging app →</a>
+        <a class="ghost-btn" href="/holmes">HolmesGPT chat →</a>
+        <a class="cta-btn" href="/demo">Start guided demo →</a>
+      </div>
     </section>
 
-    <div class="links" id="quickLinks">
-      <a id="linkAppHealth" href="#" target="_blank">App health</a>
-      <a id="linkAppDashboard" href="#" target="_blank">App dashboard</a>
-      <a id="linkArgoApp" href="#" target="_blank">ArgoCD staging app</a>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <h3>① Deploy</h3>
+        <p>Start from zero — deploy FastAPI to staging via ArgoCD and verify health checks.</p>
+      </div>
+      <div class="feature-card">
+        <h3>② Break</h3>
+        <p>Inject a bad image safely. ArgoCD shows Progressing → Degraded while the app fails.</p>
+      </div>
+      <div class="feature-card">
+        <h3>③ Explain</h3>
+        <p>AI reads pods, events, and cluster state — plain English, not ConfigMap noise.</p>
+      </div>
+      <div class="feature-card">
+        <h3>④ Heal</h3>
+        <p>GitOps rollback restores the good image, re-syncs ArgoCD, and verifies recovery.</p>
+      </div>
     </div>
 
-    <div class="cluster-alert" id="clusterAlert"></div>
+    <section class="arch-box">
+      <div class="eyebrow">Architecture</div>
+      <h2 class="section-title">What runs where</h2>
+      <p class="section-sub" style="margin-bottom:1rem">
+        Everything runs on a managed Kubernetes cluster — real VMs, real cluster, not slides.
+      </p>
+      <div class="arch-visual">
+        <div class="arch-flow">
+          <div class="arch-node">
+            <img src="/static/assets/logos/github.svg" alt="" width="32" height="32" />
+            <strong>GitHub</strong>
+            <span>Manifests &amp; GitOps</span>
+          </div>
+          <div class="arch-arrow" aria-hidden="true">→</div>
+          <div class="arch-node">
+            <img src="/static/assets/logos/argocd.svg" alt="" width="32" height="32" />
+            <strong>Argo CD</strong>
+            <span>Sync &amp; deploy</span>
+          </div>
+          <div class="arch-arrow" aria-hidden="true">→</div>
+          <div class="arch-node arch-node--cluster">
+            <img src="/static/assets/logos/kubernetes.svg" alt="" width="32" height="32" />
+            <strong>Kubernetes</strong>
+            <span>Managed OKE cluster</span>
+          </div>
+        </div>
 
-    <div class="status-grid" id="statusGrid"></div>
+        <div class="arch-cluster-box">
+          <div class="arch-cluster-head">
+            <img src="/static/assets/logos/kubernetes.svg" alt="" width="24" height="24" />
+            <span>Kubernetes cluster — 3 namespaces</span>
+          </div>
+          <div class="arch-ns-grid">
+            <div class="arch-ns">
+              <span class="arch-ns-tag">selfheal</span>
+              <img src="/static/assets/logos/k8sgpt.svg" alt="" width="20" height="20" />
+              <p>Demo control UI · kubectl + k8sgpt</p>
+            </div>
+            <div class="arch-ns">
+              <span class="arch-ns-tag">enlight-staging</span>
+              <img src="/static/assets/logos/fastapi.svg" alt="" width="20" height="20" />
+              <p>FastAPI workload pods</p>
+            </div>
+            <div class="arch-ns">
+              <span class="arch-ns-tag">argocd</span>
+              <img src="/static/assets/logos/argocd.svg" alt="" width="20" height="20" />
+              <p>GitOps controller</p>
+            </div>
+          </div>
+        </div>
 
-    <div class="layout">
+        <div class="arch-flow arch-flow--secondary">
+          <div class="arch-node">
+            <img src="/static/assets/logos/ocir.svg" alt="" width="32" height="32" />
+            <strong>Container registry</strong>
+            <span>enlight-fastapi images</span>
+          </div>
+          <div class="arch-arrow" aria-hidden="true">→</div>
+          <div class="arch-node">
+            <img src="/static/assets/logos/fastapi.svg" alt="" width="32" height="32" />
+            <strong>FastAPI image</strong>
+            <span>enlight-fastapi</span>
+          </div>
+          <div class="arch-arrow" aria-hidden="true">→</div>
+          <div class="arch-node">
+            <img src="/static/assets/logos/health.svg" alt="" width="32" height="32" />
+            <strong>Health checks</strong>
+            <span>/health endpoint</span>
+          </div>
+        </div>
+
+        <div class="arch-lb-box">
+          <div class="arch-lb-title">Load Balancer · selfheal-ui</div>
+          <div class="arch-lb-routes">
+            <a class="arch-route" href="/demo"><strong>/demo</strong><span>Guided wizard</span></a>
+            <a class="arch-route" href="/staging/"><strong>/staging/</strong><span>Live FastAPI app</span></a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slack-banner">
+      <img src="/static/assets/logos/slack.svg" alt="" width="36" height="36" class="slack-logo" />
       <div>
-        <div class="card featured">
-          <h2>Outage response demo</h2>
-          <p>
-            Run the three steps in order. AI only <strong>explains</strong> the problem — it does not fix it.
-            <strong>Auto-fix</strong> uses GitOps to roll back to a known-good image.
-          </p>
-
-          <div class="how-it-works" id="flowSteps">
-            <div class="flow-step" id="step1">
-              <div class="num">1</div>
-              <div class="lbl">Simulate outage</div>
-              <div class="hint">Bad image, app goes down</div>
-            </div>
-            <div class="flow-step" id="step2">
-              <div class="num">2</div>
-              <div class="lbl">Explain with AI</div>
-              <div class="hint">k8sgpt reads cluster state</div>
-            </div>
-            <div class="flow-step" id="step3">
-              <div class="num">3</div>
-              <div class="lbl">Auto-fix app</div>
-              <div class="hint">GitOps restores healthy deploy</div>
-            </div>
-          </div>
-
-          <div class="action-row">
-            <button class="action-btn outline" id="btnOutage" onclick="run('POST','/api/outage','Simulate outage',this)">Simulate outage</button>
-            <button class="action-btn primary" id="btnExplain" onclick="run('POST','/api/explain','Explain with AI',this)">Explain with AI →</button>
-            <button class="action-btn primary" id="btnHeal" onclick="run('POST','/api/heal','Auto-fix app',this)">Auto-fix app →</button>
-          </div>
-        </div>
-
-        <div class="card">
-          <h2>What your audience will see</h2>
-          <p>
-            Staging fails visibly in ArgoCD. AI surfaces the root cause in plain language — image pull error, crash loop, and so on.
-            One click rolls back to the last good version and the health check turns green again.
-          </p>
-        </div>
+        <strong style="font-family:var(--font-display);display:block;margin-bottom:.25rem">Slack integration</strong>
+        <p>Production deployments notify your team in Slack on deploy, failure, and auto-heal — same pipeline pattern for Flask, Node.js, and custom stacks.</p>
       </div>
-
-      <div class="live-panel">
-        <h2>Live activity</h2>
-        <div class="result-box" id="resultBox">
-          <div class="result-title">Latest outcome</div>
-          <div class="result-main" id="resultMain">—</div>
-          <div class="findings-list" id="findings"></div>
-          <a class="open-link" id="openLink" href="#" target="_blank" style="display:none">Open in ArgoCD / app →</a>
-        </div>
-        <div class="action-row" style="margin-bottom:.65rem">
-          <button class="action-btn secondary" onclick="clearLog()">Clear log</button>
-          <button class="action-btn secondary" onclick="refreshStatus()">Refresh status</button>
-        </div>
-        <div class="log" id="log"></div>
-      </div>
-    </div>
+      <a class="ghost-btn" href="/demo">See live workflow →</a>
+    </section>
   </div>
 
   <footer class="site-footer">
-    <div class="footer-inner">
-      <div class="footer-brand">
-        <span>EnlightLab</span> · Kubernetes Self-Heal Demo
-      </div>
-      <div class="footer-meta">
-        <a id="footerStaging" href="#" target="_blank">Staging app</a>
-        <a id="footerArgo" href="#" target="_blank">ArgoCD</a>
-        <span class="footer-copy">© <span id="footerYear"></span> EnlightLab · Oracle OKE</span>
-      </div>
-    </div>
+    <div class="footer-inner">© <span id="y"></span> EnlightLab · Kubernetes · k8sgpt + ArgoCD</div>
   </footer>
-
-  <script>
-    let busy = false;
-    let demoLinks = {
-      app_health: '#',
-      app_dashboard: '#',
-      argocd: '#',
-      argocd_app: '#',
-    };
-    const logEl = document.getElementById('log');
-
-    function isValidDemoUrl(url) {
-      if (!url || url === '#') return false;
-      const u = String(url).trim();
-      if (!/^https?:\/\//i.test(u)) return false;
-      if (/change_me|example\.com|\.svc\.cluster\.local|localhost/i.test(u)) return false;
-      try {
-        const parsed = new URL(u);
-        return Boolean(parsed.hostname && (parsed.hostname.includes('.') || /^\d+\.\d+\.\d+\.\d+$/.test(parsed.hostname)));
-      } catch (_) { return false; }
-    }
-
-    function applyLinks(links) {
-      if (!links) return;
-      demoLinks = { ...demoLinks, ...links };
-      const set = (id, url) => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        if (!isValidDemoUrl(url)) {
-          el.href = '#';
-          el.dataset.disabled = '1';
-          el.title = 'Expose LoadBalancer first (see Cloud Shell commands in chat)';
-          return;
-        }
-        el.href = url;
-        delete el.dataset.disabled;
-        el.title = url;
-      };
-      set('linkGitOps', links.argocd);
-      set('linkAppHealth', links.app_health);
-      set('linkAppDashboard', links.app_dashboard);
-      set('linkArgoApp', links.argocd_app);
-      set('footerStaging', links.app_dashboard || links.app_health);
-      set('footerArgo', links.argocd);
-    }
-
-    function setOpenLink(url) {
-      const link = document.getElementById('openLink');
-      if (!link) return;
-      if (isValidDemoUrl(url)) {
-        link.href = url;
-        link.style.display = 'inline-block';
-        delete link.dataset.disabled;
-      } else {
-        link.href = '#';
-        link.style.display = 'none';
-      }
-    }
-
-    document.addEventListener('click', (e) => {
-      const a = e.target.closest('a[data-disabled="1"]');
-      if (!a) return;
-      e.preventDefault();
-      log('Link not ready yet. In Cloud Shell: kubectl -n enlight-staging get svc fastapi && kubectl -n argocd get svc argocd-server', 'warn');
-    });
-
-    async function loadConfig() {
-      try {
-        const r = await fetch('/api/config');
-        const j = await r.json();
-        if (j.ok && j.data?.links) applyLinks(j.data.links);
-      } catch (_) { /* defaults */ }
-    }
-
-    function log(msg, cls = '') {
-      const line = document.createElement('div');
-      line.className = cls;
-      line.textContent = new Date().toLocaleTimeString() + ' — ' + msg;
-      logEl.prepend(line);
-    }
-
-    function clearLog() { logEl.innerHTML = ''; }
-
-    function setBusy(on, text) {
-      busy = on;
-      document.getElementById('overlay').classList.toggle('show', on);
-      document.getElementById('overlayText').textContent = text || 'Working...';
-      const badge = document.getElementById('liveBadge');
-      badge.textContent = on ? 'Running...' : badge.dataset.last || 'Ready';
-      badge.className = 'badge' + (on ? ' busy' : '');
-      document.querySelectorAll('.card .action-btn, .featured .action-btn').forEach(b => b.disabled = on);
-    }
-
-    function markStep(n, state) {
-      const el = document.getElementById('step' + n);
-      if (el) el.className = 'flow-step' + (state ? ' ' + state : '');
-    }
-
-    async function refreshStatus() {
-      try {
-        const r = await fetch('/api/status');
-        const j = await r.json();
-        if (!j.ok) throw new Error(j.error || 'Status failed');
-        renderStatus(j.data);
-        log('Status refreshed', 'info');
-      } catch (e) {
-        log('Status error: ' + e.message, 'err');
-        document.getElementById('liveBadge').textContent = 'Cluster unreachable';
-        document.getElementById('liveBadge').className = 'badge err';
-      }
-    }
-
-    async function burstRefresh(times = 10, gapMs = 3000) {
-      for (let i = 0; i < times; i++) {
-        await refreshStatus();
-        await new Promise(r => setTimeout(r, gapMs));
-      }
-    }
-
-    function shortVal(val, max = 48) {
-      if (!val) return 'Unknown';
-      const s = String(val).trim();
-      return s.length > max ? s.slice(0, max) + '…' : s;
-    }
-
-    function formatPodStatus(val) {
-      if (!val || val === 'cluster offline') {
-        return { label: 'Offline', detail: 'Cluster unreachable', ok: false };
-      }
-      const s = String(val).trim();
-      if (!s || s === 'unknown' || s === 'no pods') {
-        return { label: 'Down', detail: 'No running pods (scaled to 0 or crashed)', ok: false };
-      }
-      const line = s.split('\n')[0].trim();
-      const parts = line.split(/\s+/);
-      if (parts.length >= 3) {
-        const name = parts[0];
-        const ready = parts[1];
-        const phase = parts[2];
-        const healthy = ready === '1/1' && phase === 'Running';
-        const shortName = name.length > 22 ? name.slice(0, 20) + '…' : name;
-        return {
-          label: healthy ? 'Running' : phase,
-          detail: `${shortName} · ${ready} ready`,
-          ok: healthy,
-        };
-      }
-      return {
-        label: podLooksHealthy(s) ? 'Running' : 'Check pod',
-        detail: shortVal(s, 36),
-        ok: podLooksHealthy(s),
-      };
-    }
-
-    function formatFinding(text) {
-      const s = String(text || '').trim();
-      if (!s) return '';
-      // Strip noisy k8sgpt prefixes for client-facing cards
-      return s
-        .replace(/^(\d+:\s*)?/, '')
-        .replace(/\[.*?\]\s*/g, '')
-        .trim();
-    }
-
-    function podLooksHealthy(val) {
-      if (!val) return false;
-      const s = String(val);
-      return s.includes('1/1') && s.includes('Running');
-    }
-
-    function gitOpsState(d) {
-      if (d.gitops_ui_state) return d.gitops_ui_state;
-      const gh = String(d.gitops_app || '');
-      if (!gh || gh.includes('cluster offline')) return 'fail';
-      const i = gh.indexOf('/');
-      const sync = i >= 0 ? gh.slice(0, i) : gh;
-      const health = i >= 0 ? gh.slice(i + 1) : '';
-      if (health === 'Healthy' && sync === 'Synced') return 'ok';
-      if (health === 'Healthy') return 'warn';
-      return 'fail';
-    }
-
-    function gitOpsLabel(d) {
-      const gh = shortVal(d.gitops_app);
-      const st = gitOpsState(d);
-      if (st === 'warn' && gh.includes('OutOfSync')) return 'Out of sync (app healthy)';
-      return gh;
-    }
-
-    function renderStatus(d) {
-      const clusterOk = d.cluster !== 'fail';
-      const alert = document.getElementById('clusterAlert');
-      if (clusterOk) {
-        alert.classList.remove('show');
-        alert.textContent = '';
-      } else {
-        alert.classList.add('show');
-        alert.innerHTML = '<strong>Cluster offline.</strong> ' + (d.cluster_message || 'Check OKE cluster and kubeconfig.');
-      }
-
-      if (d.links) applyLinks(d.links);
-
-      const pod = formatPodStatus(d.pod);
-      const items = [
-        ['App health', d.app_health === 'ok' ? 'Healthy' : 'Down', '', d.app_health],
-        ['GitOps', gitOpsLabel(d), '', gitOpsState(d)],
-        ['Workload pod', pod.label, pod.detail, pod.ok ? 'ok' : 'fail'],
-      ];
-      const grid = document.getElementById('statusGrid');
-      grid.innerHTML = items.map(([label, val, detail, st]) => {
-        const icon = st === 'ok' ? 'ok' : (st === 'warn' ? 'warn' : 'fail');
-        const iconText = icon === 'ok' ? '✓' : (icon === 'warn' ? '~' : '!');
-        const detailHtml = detail
-          ? `<div class="stat-detail" title="${detail.replace(/"/g, '&quot;')}">${detail}</div>`
-          : '';
-        return `<div class="stat-card"><div class="stat-icon ${icon}">${iconText}</div><div class="stat-body"><div class="stat-label">${label}</div><div class="stat-val">${val}</div>${detailHtml}</div></div>`;
-      }).join('');
-      const healthy = d.app_health === 'ok' && clusterOk;
-      const badge = document.getElementById('liveBadge');
-      badge.dataset.last = !clusterOk ? 'Cluster offline' : (healthy ? 'Systems healthy' : 'Outage detected');
-      badge.textContent = badge.dataset.last;
-      badge.className = 'badge' + (healthy ? '' : ' err');
-    }
-
-    async function run(method, url, label, btn) {
-      if (busy) return;
-      if (btn) btn.classList.add('running');
-      setBusy(true, label + '...');
-      log('Starting: ' + label, 'info');
-      if (/outage/i.test(label)) markStep(1, 'running');
-      if (/explain/i.test(label)) markStep(2, 'running');
-      if (/fix/i.test(label)) markStep(3, 'running');
-
-      try {
-        const timeoutMs = /fix/i.test(label) ? 90000 : 60000;
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-        const r = await fetch(url, { method, signal: ctrl.signal });
-        clearTimeout(timer);
-        const j = await r.json();
-        if (!j.ok) throw new Error(j.error || 'Request failed');
-        const d = j.data;
-        const box = document.getElementById('resultBox');
-        const main = document.getElementById('resultMain');
-        const findings = document.getElementById('findings');
-        const link = document.getElementById('openLink');
-        box.classList.add('show');
-        findings.innerHTML = '';
-
-        if (/outage/i.test(label)) {
-          main.textContent = d.message || 'Outage simulated';
-          main.className = 'result-main err';
-          markStep(1, 'done'); markStep(2, ''); markStep(3, '');
-          log('Mode: ' + (d.mode || 'instant'), 'info');
-          log('Pods: ' + (d.pods || '—'), 'err');
-          log('ArgoCD: ' + (d.argocd || '—') + ' (may lag — use cards above)', 'err');
-          (d.tips || []).forEach(t => {
-            const div = document.createElement('div');
-            div.className = 'finding tip';
-            div.textContent = t;
-            findings.appendChild(div);
-          });
-          if (d.staging_url && isValidDemoUrl(d.staging_url)) setOpenLink(d.staging_url);
-          else if (d.open_url) setOpenLink(d.open_url);
-          burstRefresh(10, 3000);
-        } else if (/explain/i.test(label)) {
-          main.textContent = d.message || 'Analysis complete';
-          main.className = 'result-main ' + (d.findings && d.findings.length ? 'ok' : 'err');
-          markStep(2, d.findings && d.findings.length ? 'done' : 'fail');
-          (d.findings || []).forEach(f => {
-            const text = formatFinding(f);
-            if (!text) return;
-            const div = document.createElement('div');
-            div.className = 'finding';
-            div.textContent = text;
-            div.title = text;
-            findings.appendChild(div);
-          });
-          const summary = (d.findings || []).map(formatFinding).filter(Boolean).join(' · ');
-          log(summary || d.raw?.slice(0, 160) || 'No findings', d.findings?.length ? 'ok' : 'warn');
-        } else if (/fix/i.test(label)) {
-          main.textContent = d.message || 'Heal complete';
-          main.className = 'result-main ' + (d.app_reachable ? 'ok' : 'err');
-          markStep(3, d.app_reachable ? 'done' : 'fail');
-          log('Health: ' + (d.health || '—'), d.app_reachable ? 'ok' : 'err');
-          if (d.open_url) setOpenLink(d.open_url);
-        }
-        await refreshStatus();
-        log('Done: ' + label, 'ok');
-      } catch (e) {
-        const msg = e.name === 'AbortError'
-          ? (label + ' timed out — check Cloud Shell: kubectl -n enlight-staging get pods')
-          : e.message;
-        log('Error: ' + msg, 'err');
-        document.getElementById('resultMain').textContent = msg;
-        document.getElementById('resultMain').className = 'result-main err';
-        document.getElementById('resultBox').classList.add('show');
-      } finally {
-        if (btn) btn.classList.remove('running');
-        setBusy(false);
-      }
-    }
-
-    loadConfig().then(refreshStatus);
-    setInterval(refreshStatus, 20000);
-    document.getElementById('footerYear').textContent = new Date().getFullYear();
-  </script>
+  <script>document.getElementById('y').textContent = new Date().getFullYear();</script>
 </body>
 </html>

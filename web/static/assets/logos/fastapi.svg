@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="FastAPI">
+  <circle cx="12" cy="12" r="11" fill="#009688"/>
+  <path fill="#fff" d="M7 8h10v2.2H12.8V16H11V10.2H7V8z"/>
+</svg>

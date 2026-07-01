@@ -17,9 +17,14 @@ oci ce cluster create-kubeconfig \
 kubectl apply -f "$ROOT/deploy/k8s/selfheal-ui.yaml"
 kubectl apply -f "$ROOT/deploy/k8s/staging-app/"
 
-echo "=== Restart UI to pull latest image ==="
-kubectl -n selfheal rollout restart deployment/selfheal-ui
+echo "=== Deploy UI image (use explicit tag — not just rollout restart) ==="
+UI_IMAGE="${UI_IMAGE:-bom.ocir.io/bmitpaosivqx/selfheal-ui:ui-20260619}"
+kubectl -n selfheal set image deployment/selfheal-ui ui="$UI_IMAGE"
 kubectl -n selfheal rollout status deployment/selfheal-ui --timeout=180s
+
+echo "=== Verify HTML served ==="
+UI_IP=$(kubectl -n selfheal get svc selfheal-ui -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+curl -s "http://${UI_IP}/" | grep -q "How fast can your team" && echo "OK: new UI live at http://${UI_IP}/" || echo "WARN: still old UI — hard-refresh browser or check image tag"
 
 echo "=== Verify in-cluster kubectl from the pod ==="
 kubectl -n selfheal exec deploy/selfheal-ui -- kubectl get nodes

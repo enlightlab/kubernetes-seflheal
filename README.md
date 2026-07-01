@@ -6,7 +6,7 @@ Standalone web app for the **outage response** story: simulate a failure, explai
 
 | Step | Button | What happens |
 |------|--------|--------------|
-| 1 | Simulate outage | Scales app down or injects failure (instant mode) |
+| 1 | Simulate outage | Sets bad image — ArgoCD Progressing → Degraded (~1–2 min) |
 | 2 | Explain with AI | Runs `k8sgpt analyze` on the staging namespace |
 | 3 | Auto-fix app | Restores good deployment + re-enables ArgoCD sync |
 
@@ -65,7 +65,7 @@ See `deploy/oci/env.example` and `deploy/k8s/selfheal-ui.yaml` ConfigMap.
 
 | Variable | Purpose |
 |----------|---------|
-| `OUTAGE_MODE` | `instant` (default), `crash`, or `image` |
+| `OUTAGE_MODE` | `image` (default), `instant`, or `crash` |
 | `GOOD_IMAGE` / `BAD_IMAGE` | OCIR image refs for heal / break |
 | `DEPLOY_TARGET` | `oci` or `local` |
 

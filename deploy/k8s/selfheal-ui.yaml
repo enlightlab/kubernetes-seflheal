@@ -34,7 +34,7 @@ rules:
     verbs: ["get", "list", "patch", "update", "create", "delete"]
   - apiGroups: ["argoproj.io"]
     resources: ["applications"]
-    verbs: ["get", "list", "patch"]
+    verbs: ["get", "list", "patch", "create", "update", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -76,7 +76,17 @@ data:
   PUBLIC_ARGOCD_APP_URL: ""
   HEAL_OVERLAY_PATH: "/app/deploy/k8s/staging-heal"
   STAGING_APP_PATH: "/app/deploy/k8s/staging-app"
-  OUTAGE_MODE: "instant"
+  OUTAGE_MODE: "image"
+  DEMO_STEP_PAUSE: "2.0"
+  ARGOCD_DISPLAY_USER: "admin"
+  AUTO_DEPLOY_ON_LOAD: "true"
+  # Enable HolmesGPT after storing gemini-api-key in secret k8sgpt-ai — run deploy/oci/setup-holmes.sh
+  HOLMES_ENABLED: "false"
+  HOLMES_MODE: "cli"
+  HOLMES_MODEL: "gemini/gemini-3.5-flash"
+  HOLMES_TIMEOUT: "300"
+  HOLMES_MAX_STEPS: "10"
+  HOLMES_CHAT_MAX_STEPS: "8"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -120,6 +130,20 @@ spec:
                   name: k8sgpt-ai
                   key: anthropic-api-key
                   optional: true
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: k8sgpt-ai
+                  key: gemini-api-key
+                  optional: true
+            - name: TOOL_SCHEMA_NO_PARAM_OBJECT_IF_NO_PARAMS
+              value: "true"
+            - name: ARGOCD_DISPLAY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: argocd-demo-login
+                  key: password
+                  optional: true
           readinessProbe:
             tcpSocket:
               port: 30901
@@ -143,10 +167,10 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 256Mi
+              memory: 768Mi
             limits:
-              cpu: 500m
-              memory: 512Mi
+              cpu: 1000m
+              memory: 1536Mi
 ---
 apiVersion: v1
 kind: Service

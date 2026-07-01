@@ -1,0 +1,15 @@
+# TLS for argocd.enlightlab.com — adjust issuerRef.name to match your cluster.
+# To discover: kubectl get clusterissuer
+# Or copy from selfheal cert: kubectl -n selfheal get certificate -o yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: argocd-enlightlab-tls
+  namespace: argocd
+spec:
+  secretName: argocd-enlightlab-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - argocd.enlightlab.com

@@ -54,6 +54,14 @@ Configure k8sgpt inside the cluster (once):
 kubectl -n selfheal exec deploy/selfheal-ui -- k8sgpt auth add --backend openai --password "$OPENAI_API_KEY"
 ```
 
+**Argo CD login on the demo page** — run once in Cloud Shell (sets a known password and syncs it to the UI):
+
+```bash
+bash deploy/oci/setup-argocd-demo-login.sh
+# Default password: EnlightDemo2026!
+# Or: export DEMO_ARGOCD_PASSWORD='YourPassword' && bash deploy/oci/setup-argocd-demo-login.sh
+```
+
 Or bake auth into an init step / custom entrypoint if preferred.
 
 ## Step 3 — Deploy to OKE
@@ -105,4 +113,6 @@ start-selfheal-ui.bat
 | Cluster offline | OKE cluster stopped? Check `kubectl get nodes` |
 | Explain empty | k8sgpt auth + `OPENAI_API_KEY` secret |
 | Auto-fix fails | RBAC on ServiceAccount; check `GOOD_IMAGE` exists in OCIR |
-| Public links 404 | Update `PUBLIC_*` URLs in ConfigMap |
+| Public links 404 | Update `PUBLIC_*` URLs in ConfigMap; staging uses `https://selfheal.enlightlab.com/staging/` |
+| Argo CD link timeout | Run `bash deploy/oci/setup-argocd-ingress.sh` — Ingress on `argocd.enlightlab.com` |
+| Argo CD invalid password | Run `bash deploy/oci/setup-argocd-demo-login.sh` — resets admin password and updates UI |

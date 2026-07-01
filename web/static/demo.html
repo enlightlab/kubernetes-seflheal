@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Guided Demo — EnlightLab Self-Heal</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="page-bg" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <a class="wordmark" href="/">
+      <img src="/static/assets/company-logo.png" alt="" onerror="this.style.display='none'" />
+      EnlightLab
+    </a>
+    <div class="topbar-actions">
+      <span class="badge" id="liveBadge">Checking...</span>
+      <a class="ghost-btn" href="/">Overview</a>
+      <a class="ghost-btn" href="/holmes">HolmesGPT chat</a>
+      <a class="ghost-btn" id="linkGitOps" href="#" target="_blank">Open ArgoCD</a>
+    </div>
+  </header>
+
+  <div class="wrap demo-page">
+    <div style="margin-bottom:1.25rem">
+      <div class="eyebrow">Guided demo wizard</div>
+      <h1 class="section-title">Self-heal drill — deploy → break → explain → recover</h1>
+      <p class="section-sub">Click a step below — live cluster activity appears immediately underneath so your client sees cause and effect.</p>
+    </div>
+
+    <div class="demo-already-live banner-info" id="demoAlreadyLive" hidden>
+      <strong>fastapi-staging is already in Argo CD</strong> (Synced / Healthy) — the demo starts at <strong>Step 2</strong>.
+      To show a full deploy from zero, click <strong>Reset — remove fastapi-staging</strong> first.
+    </div>
+
+    <!-- Steps first: client clicks here -->
+    <nav class="panel wizard-strip" id="wizardNav">
+      <div class="wizard-strip-head">
+        <h3>Steps</h3>
+        <span class="badge" id="stepBadge">Step 1 — Deploy</span>
+      </div>
+      <div class="wizard-steps-row">
+        <div class="wizard-step active" id="wiz1" data-step="1">
+          <div class="wizard-step-head"><span class="wizard-num">1</span><h4>Deploy fastapi-staging</h4></div>
+          <div class="deploy-detected" id="deployDetected" hidden>✓ fastapi-staging already in Argo CD</div>
+          <p id="wiz1Desc">Register the Argo CD app from GitHub and sync workloads to the cluster.</p>
+          <button class="action-btn primary" id="btnDeploy" type="button">Deploy fastapi-staging →</button>
+          <button class="action-btn secondary" id="btnContinue" type="button" hidden>Continue to Step 2 →</button>
+          <div class="step-live" id="stepLive1" hidden></div>
+        </div>
+        <div class="wizard-step locked" id="wiz2" data-step="2">
+          <div class="wizard-step-head"><span class="wizard-num">2</span><h4>Simulate outage</h4></div>
+          <p>Bad image → ArgoCD Degraded (~1–2 min).</p>
+          <button class="action-btn outline" id="btnOutage" type="button" disabled>Simulate outage</button>
+          <div class="step-live" id="stepLive2" hidden></div>
+        </div>
+        <div class="wizard-step locked" id="wiz3" data-step="3">
+          <div class="wizard-step-head"><span class="wizard-num">3</span><h4>Explain with AI</h4></div>
+          <p>HolmesGPT + k8sgpt RCA in plain English.</p>
+          <button class="action-btn primary" id="btnExplain" type="button" disabled>Explain with AI →</button>
+          <div class="step-live" id="stepLive3" hidden></div>
+        </div>
+        <div class="wizard-step locked" id="wiz4" data-step="4">
+          <div class="wizard-step-head"><span class="wizard-num">4</span><h4>Auto-fix</h4></div>
+          <p>Restore good image + verify health green.</p>
+          <button class="action-btn primary" id="btnHeal" type="button" disabled>Auto-fix app →</button>
+          <div class="step-live" id="stepLive4" hidden></div>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Live runner: directly under the step you clicked -->
+    <section class="live-runner" id="liveRunner" aria-live="polite">
+      <div class="live-runner-head">
+        <span class="live-runner-label"><span class="live-pip" id="runnerPip"></span> Live cluster activity</span>
+        <span class="live-runner-idle" id="runnerIdle">Click a step above to start</span>
+      </div>
+      <div class="ops-theater" id="opsTheater">
+        <div class="ops-pipeline">
+          <div class="ops-node" data-phase="git">
+            <div class="ops-node-icon"><img src="/static/assets/logos/github-light.svg" alt="GitHub" /></div>
+            <div class="ops-node-name">GitHub</div>
+          </div>
+          <div class="ops-connector" data-conn="0"></div>
+          <div class="ops-node" data-phase="argocd">
+            <div class="ops-node-icon"><img src="/static/assets/logos/argocd.svg" alt="Argo CD" /></div>
+            <div class="ops-node-name">Argo CD</div>
+          </div>
+          <div class="ops-connector" data-conn="1"></div>
+          <div class="ops-node" data-phase="k8s">
+            <div class="ops-node-icon"><img src="/static/assets/logos/kubernetes.svg" alt="Kubernetes" /></div>
+            <div class="ops-node-name">Kubernetes</div>
+          </div>
+          <div class="ops-connector" data-conn="2"></div>
+          <div class="ops-node" data-phase="break">
+            <div class="ops-node-icon"><img src="/static/assets/logos/fastapi.svg" alt="FastAPI Pod" /></div>
+            <div class="ops-node-name">Pod</div>
+          </div>
+          <div class="ops-connector" data-conn="3"></div>
+          <div class="ops-node" data-phase="ai">
+            <div class="ops-node-icon"><img src="/static/assets/logos/k8sgpt.svg" alt="k8sgpt" /></div>
+            <div class="ops-node-name">HolmesGPT</div>
+          </div>
+          <div class="ops-connector" data-conn="4"></div>
+          <div class="ops-node" data-phase="health">
+            <div class="ops-node-icon"><img src="/static/assets/logos/health.svg" alt="Health check" /></div>
+            <div class="ops-node-name">Health</div>
+          </div>
+        </div>
+        <div class="ops-current" id="opsCurrent">
+          <div class="ops-current-title"><span class="spin" id="opsSpin" style="display:none"></span><span id="opsCurrentTitle">Waiting for Step 1…</span></div>
+          <div class="ops-current-detail" id="opsCurrentDetail">Status updates here when you run a step.</div>
+        </div>
+        <div class="ops-progress"><div class="ops-progress-bar" id="opsProgressBar"></div></div>
+      </div>
+    </section>
+
+    <div class="demo-layout">
+      <aside class="demo-sidebar">
+        <div class="panel">
+          <h3>Live status</h3>
+          <div class="status-grid" id="statusGrid" style="margin-top:.5rem"></div>
+        </div>
+
+        <div class="panel">
+          <h3>ArgoCD login</h3>
+          <p class="panel-muted" style="margin-bottom:.65rem">Open GitOps in another tab during the demo.</p>
+          <div class="argocd-creds" id="argocdCreds">
+            <div class="row"><span>Username</span><code id="argoUser">admin</code></div>
+            <div class="row"><span>Password</span><span class="argo-pass-wrap"><code id="argoPass">loading…</code><button type="button" class="action-btn ghost-sm" id="btnCopyArgoPass" title="Copy password">Copy</button></span></div>
+            <p class="panel-muted argo-pass-hint" id="argoPassHint" style="margin-top:.45rem;font-size:.72rem"></p>
+          </div>
+          <div class="links-row" style="margin-top:.65rem" id="quickLinks">
+            <a id="linkAppDashboard" href="#" target="_blank">Staging app</a>
+            <a id="linkAppHealth" href="#" target="_blank">Health API</a>
+            <a id="linkArgoApp" href="#" target="_blank">ArgoCD app</a>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Presenter prep</h3>
+          <p class="panel-muted" style="margin-bottom:.65rem">Reset removes fastapi-staging from Argo CD <strong>and</strong> deletes staging workloads so Step 1 is a true deploy from zero.</p>
+          <button class="action-btn secondary" id="btnReset" type="button">Reset — remove fastapi-staging</button>
+          <div class="step-live reset-live" id="resetLive" hidden></div>
+        </div>
+
+        <div class="panel" id="archPanel" style="display:none">
+          <h3>Architecture (Step 1)</h3>
+          <ul id="archList" class="panel-muted" style="padding-left:1.1rem;font-size:.76rem"></ul>
+        </div>
+      </aside>
+
+      <main class="activity-panel">
+        <div class="activity-head">
+          <h2>Step timeline &amp; outcome</h2>
+        </div>
+        <div class="activity-body">
+          <div class="timeline-feed" id="timeline">
+            <div class="tl-item done">
+              <span class="tl-dot"></span>
+              <div>
+                <div class="tl-title">Ready to start</div>
+                <div class="tl-detail">Use <strong>Reset — remove fastapi-staging</strong> for a from-zero deploy story, or continue at <strong>Step 2</strong> if already live.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="result-box" id="resultBox">
+            <div class="result-title">Latest outcome</div>
+            <div class="result-main" id="resultMain">Waiting for Step 1…</div>
+            <div id="resultExtra"></div>
+            <div id="findings"></div>
+            <a class="open-link" id="openLink" href="#" target="_blank" style="display:none;margin-top:.5rem">Open staging / ArgoCD →</a>
+          </div>
+
+          <div class="explain-report" id="explainReport" hidden>
+            <div class="explain-report-head">
+              <div>
+                <div class="explain-eyebrow">AI diagnosis · HolmesGPT + k8sgpt</div>
+                <h3 class="explain-headline" id="explainHeadline">—</h3>
+              </div>
+              <div class="explain-badges" id="explainBadges"></div>
+            </div>
+
+            <div class="explain-simple-box">
+              <div class="explain-simple-label">In simple English</div>
+              <p class="explain-simple-text" id="explainSimple">—</p>
+            </div>
+
+            <div class="explain-section">
+              <div class="explain-section-title">What happened (step by step)</div>
+              <ul class="explain-bullets" id="explainBullets"></ul>
+            </div>
+
+            <div class="argocd-tree-panel">
+              <div class="argocd-tree-head">
+                <img src="/static/assets/logos/argocd.svg" alt="" width="22" height="22" />
+                <span>Argo CD application tree</span>
+                <a class="ghost-btn argocd-tree-link" id="explainArgoLink" href="#" target="_blank">Open in Argo CD →</a>
+              </div>
+              <p class="argocd-tree-summary" id="argocdTreeSummary"></p>
+              <div class="argocd-source-row" id="argocdSourceRow"></div>
+              <div class="argocd-resource-tree" id="argocdResourceTree"></div>
+            </div>
+
+            <div class="holmes-panel" id="holmesPanel" hidden>
+              <div class="holmes-panel-head">
+                <span class="holmes-badge">HolmesGPT</span>
+                <span class="holmes-sub">CNCF agentic troubleshooting · read-only</span>
+              </div>
+              <p class="holmes-text" id="holmesText">—</p>
+            </div>
+
+            <details class="explain-technical" id="explainTechnical" open>
+              <summary>Technical evidence (k8sgpt &amp; cluster events)</summary>
+              <div class="explain-tech-list" id="explainTechList"></div>
+            </details>
+
+            <div class="explain-next" id="explainNext"></div>
+          </div>
+
+          <div style="display:flex;gap:.5rem">
+            <button class="action-btn ghost-sm" type="button" id="btnClearLog">Clear log</button>
+            <button class="action-btn ghost-sm" type="button" id="btnRefresh">Refresh status</button>
+          </div>
+          <div class="log" id="log"></div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="footer-inner">© <span id="footerYear"></span> EnlightLab · Slack alerts available in production pipeline</div>
+  </footer>
+
+  <script src="/static/demo.js"></script>
+</body>
+</html>
