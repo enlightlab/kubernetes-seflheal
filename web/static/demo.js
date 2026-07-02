@@ -4,7 +4,61 @@
   let wizardStep = 1;
   let stepCount = 0;
   let runningTlId = null;
-  const STEP_LABELS = ['', 'Deploy fastapi-staging', 'Simulate outage', 'Explain with AI (HolmesGPT)', 'Auto-fix'];
+  let resetLockUntil = 0;
+
+  const APP_CONFIG = {
+    fastapi: {
+      id: 'fastapi',
+      label: 'FastAPI API',
+      argocdName: 'fastapi-staging',
+      deployLabel: 'Deploy fastapi-staging',
+      resetLabel: 'Reset — remove fastapi-staging',
+    },
+    nginx: {
+      id: 'nginx',
+      label: 'Nginx Web',
+      argocdName: 'nginx-staging',
+      deployLabel: 'Deploy nginx-staging',
+      resetLabel: 'Reset — remove nginx-staging',
+    },
+  };
+
+  const DEMO_APP_KEY = 'enlightlab.demoApp';
+  let selectedDemoApp = 'fastapi';
+
+  function currentApp() {
+    return APP_CONFIG[selectedDemoApp] || APP_CONFIG.fastapi;
+  }
+
+  function wizardStorageKey() {
+    return `enlightlab.demoWizardStep.${selectedDemoApp}`;
+  }
+
+  function stepLabels() {
+    const a = currentApp();
+    return ['', a.deployLabel, 'Simulate outage', 'Explain with AI (HolmesGPT)', 'Auto-fix'];
+  }
+
+  function isClean(d) {
+    return !!(d.app_clean ?? d.staging_clean);
+  }
+
+  function isDeployed(d) {
+    return !!(d.app_deployed ?? d.staging_deployed);
+  }
+
+  function statusMessage(d) {
+    return d.app_status_message || d.staging_status_message || '';
+  }
+
+  function appStatusUrl() {
+    return `/api/status?demo_app=${encodeURIComponent(selectedDemoApp)}`;
+  }
+
+  function appStreamUrl(action) {
+    return `/api/apps/${encodeURIComponent(selectedDemoApp)}/${action}/stream`;
+  }
+
   const PHASE_ORDER = ['git', 'argocd', 'k8s', 'break', 'ai', 'health'];
 
   const logEl = document.getElementById('log');
@@ -23,6 +77,90 @@
   let autoDeployAttempted = false;
   let autoDeployEnabled = true;
   let resetMode = false;
+
+  function saveWizardStep(n) {
+    try { sessionStorage.setItem(wizardStorageKey(), String(n)); } catch (_) {}
+  }
+
+  function loadWizardStep() {
+    try {
+      const v = parseInt(sessionStorage.getItem(wizardStorageKey()), 10);
+      return Number.isFinite(v) ? Math.max(1, Math.min(5, v)) : 1;
+    } catch (_) { return 1; }
+  }
+
+  function clearWizardStep() {
+    try { sessionStorage.removeItem(wizardStorageKey()); } catch (_) {}
+  }
+
+  function minimumStepFromCluster(d) {
+    if (isClean(d)) return 1;
+    if (isDeployed(d)) return 2;
+    if (!d.argocd_app_exists && d.workloads_exist) return 1;
+    if (!isDeployed(d) && d.argocd_app_exists && (d.app_health_check === 'fail' || d.app_health === 'fail' || !String(d.pod || '').includes('1/1'))) {
+      return 3;
+    }
+    return 1;
+  }
+
+  function syncTheaterForStep(step, d) {
+    if (step >= 5) activatePhase('health', 'done');
+    else if (step >= 4) activatePhase('ai', 'done');
+    else if (step >= 3 && !isDeployed(d)) activatePhase('break', 'break');
+    else if (step >= 2 || isDeployed(d)) activatePhase('health', 'done');
+  }
+
+  function reconcileWizardStep(d) {
+    if (busy || demoInProgress) return;
+    if (resetLockUntil && Date.now() < resetLockUntil) {
+      setWizardStep(1);
+      return;
+    }
+    const saved = loadWizardStep();
+    const floor = minimumStepFromCluster(d);
+    let step;
+    if (isClean(d)) {
+      step = 1;
+      clearWizardStep();
+    } else {
+      step = Math.max(saved, floor);
+    }
+    if (step !== wizardStep) setWizardStep(step);
+    else saveWizardStep(step);
+    syncTheaterForStep(step, d);
+  }
+
+  function updateAppChrome() {
+    const app = currentApp();
+    document.querySelectorAll('.demo-app-tab').forEach(btn => {
+      const on = btn.dataset.app === selectedDemoApp;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    const wiz1Title = document.getElementById('wiz1Title');
+    if (wiz1Title) wiz1Title.textContent = app.deployLabel;
+    const btnDeploy = document.getElementById('btnDeploy');
+    if (btnDeploy && !btnDeploy.hidden) btnDeploy.textContent = app.deployLabel + ' →';
+    const btnReset = document.getElementById('btnReset');
+    if (btnReset) btnReset.textContent = app.resetLabel;
+    const resetHelp = document.getElementById('resetHelp');
+    if (resetHelp) resetHelp.innerHTML = `Reset removes <strong>${app.argocdName}</strong> from Argo CD <strong>and</strong> deletes workloads so Step 1 is a true deploy from zero.`;
+    const liveTitle = document.getElementById('demoAlreadyLiveTitle');
+    if (liveTitle) liveTitle.textContent = `${app.argocdName} is already in Argo CD`;
+    const resetHint = document.getElementById('demoResetHint');
+    if (resetHint) resetHint.textContent = app.resetLabel;
+    try { sessionStorage.setItem(DEMO_APP_KEY, selectedDemoApp); } catch (_) {}
+  }
+
+  function switchDemoApp(appId) {
+    if (!APP_CONFIG[appId] || appId === selectedDemoApp) return;
+    selectedDemoApp = appId;
+    wizardStep = loadWizardStep();
+    updateAppChrome();
+    hideExplainReport();
+    statusFailCount = 0;
+    refreshStatus();
+  }
 
   function focusRunner() {
     liveRunner?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -106,7 +244,7 @@
       badge.className = 'badge busy';
       theater.classList.add('active');
       liveRunner?.classList.add('active');
-      runnerIdle && (runnerIdle.textContent = resetMode ? 'Remove fastapi-staging' : (STEP_LABELS[runningStepNum] || 'Running…'));
+      runnerIdle && (runnerIdle.textContent = resetMode ? currentApp().resetLabel : (stepLabels()[runningStepNum] || 'Running…'));
       runnerPip?.classList.add('on');
       opsSpin.style.display = 'inline-block';
     } else {
@@ -128,8 +266,9 @@
 
   function setWizardStep(n) {
     wizardStep = Math.max(1, Math.min(5, n));
+    saveWizardStep(wizardStep);
     document.getElementById('stepBadge').textContent =
-      wizardStep >= 5 ? 'Demo complete ✓' : `Step ${wizardStep} — ${STEP_LABELS[wizardStep]}`;
+      wizardStep >= 5 ? 'Demo complete ✓' : `Step ${wizardStep} — ${stepLabels()[wizardStep]}`;
     [1, 2, 3, 4].forEach(i => {
       const el = document.getElementById('wiz' + i);
       if (!el) return;
@@ -146,13 +285,14 @@
   }
 
   function applyDeployedState(d) {
-    const deployed = !!d.staging_deployed;
+    const deployed = isDeployed(d);
+    const app = currentApp();
     const detected = document.getElementById('deployDetected');
     const btnDeploy = document.getElementById('btnDeploy');
     const btnContinue = document.getElementById('btnContinue');
     const wiz1Desc = document.getElementById('wiz1Desc');
 
-    if (wizardStep === 1 && !busy && !demoInProgress && deployed) {
+    if (wizardStep === 1 && !busy && !demoInProgress && deployed && !(resetLockUntil && Date.now() < resetLockUntil)) {
       setWizardStep(2);
       activatePhase('health', 'done');
     }
@@ -162,15 +302,15 @@
       if (banner) banner.hidden = false;
       if (detected) {
         detected.hidden = false;
-        detected.textContent = `✓ fastapi-staging live — Argo CD ${d.gitops_app || 'Healthy'}`;
+        detected.textContent = `✓ ${app.argocdName} live — Argo CD ${d.gitops_app || 'Healthy'}`;
       }
-      if (wiz1Desc) wiz1Desc.textContent = 'Detected from cluster — skip deploy unless you Reset to remove fastapi-staging first.';
+      if (wiz1Desc) wiz1Desc.textContent = `Detected from cluster — skip deploy unless you ${app.resetLabel} first.`;
       if (btnDeploy) btnDeploy.hidden = true;
       if (btnContinue) btnContinue.hidden = wizardStep > 2;
-      if (wizardStep <= 2 && !busy) {
-        const msg = d.staging_status_message || 'fastapi-staging is live. Continue to Step 2 — Simulate outage.';
+      if (wizardStep <= 2 && !busy && !isClean(d)) {
+        const msg = statusMessage(d) || `${app.label} is live. Continue to Step 2 — Simulate outage.`;
         showResult(msg, 'ok');
-        opsTitle.textContent = 'fastapi-staging already deployed';
+        opsTitle.textContent = `${app.label} already deployed`;
         opsDetail.textContent = `Argo CD ${d.gitops_app || 'Healthy'} · health checks pass. Use Step 2 to simulate an outage.`;
         if (runnerIdle && !liveRunner?.classList.contains('active')) {
           runnerIdle.textContent = 'App live — ready for Step 2';
@@ -180,27 +320,32 @@
       const banner = document.getElementById('demoAlreadyLive');
       if (banner) banner.hidden = true;
       if (detected) detected.hidden = true;
-      if (btnDeploy) { btnDeploy.hidden = false; btnDeploy.textContent = 'Deploy fastapi-staging →'; }
+      if (btnDeploy) { btnDeploy.hidden = false; btnDeploy.textContent = app.deployLabel + ' →'; }
       if (btnContinue) btnContinue.hidden = true;
-      if (wiz1Desc) wiz1Desc.textContent = 'Registers fastapi-staging in Argo CD and syncs from GitHub.';
-      const clean = !!d.staging_clean;
-      const outage = !clean && (d.workloads_exist || d.argocd_app_exists);
-      const msg = d.staging_status_message || (
+      if (wiz1Desc) wiz1Desc.textContent = `Registers ${app.argocdName} in Argo CD and syncs from Git.`;
+      const clean = isClean(d);
+      const outage = !clean && (d.workloads_exist || d.argocd_app_exists) && !deployed;
+      if (outage && wizardStep >= 3 && !(resetLockUntil && Date.now() < resetLockUntil)) {
+        if (btnDeploy) btnDeploy.hidden = true;
+      } else if (clean || (resetLockUntil && Date.now() < resetLockUntil)) {
+        if (btnDeploy) btnDeploy.hidden = false;
+      }
+      const msg = statusMessage(d) || (
         outage
           ? 'Outage in progress — app is down on purpose. Continue to Step 3 Explain.'
           : clean
-            ? 'Clean slate — staging is down. Click Deploy for a full GitOps deploy.'
-            : 'fastapi-staging not deployed — click Deploy or wait for auto-deploy.'
+            ? 'Clean slate — app is down and not in Argo CD. Click Deploy for a full GitOps deploy.'
+            : `${app.label} not deployed — click Deploy or wait for auto-deploy.`
       );
-      showResult(msg, outage ? 'err' : (clean ? 'warn' : ''));
-      opsTitle.textContent = outage
-        ? 'Outage active — staging app down'
-        : (clean ? 'Staging torn down — ready for deploy' : 'fastapi-staging not deployed');
-      opsDetail.textContent = outage
+      showResult(msg, outage && !(resetLockUntil && Date.now() < resetLockUntil) ? 'err' : (clean ? 'warn' : ''));
+      opsTitle.textContent = outage && !(resetLockUntil && Date.now() < resetLockUntil)
+        ? 'Outage active — app down'
+        : (clean ? 'App not registered — ready for deploy' : `${app.label} not deployed`);
+      opsDetail.textContent = outage && !(resetLockUntil && Date.now() < resetLockUntil)
         ? `Argo CD ${d.gitops_app || 'Degraded'} · health down · use Step 3 Explain then Step 4 Auto-fix.`
         : (clean
           ? 'Not in Argo CD · no workloads · health down. Step 1 brings everything back from Git.'
-          : 'Step 1 registers the Argo CD app and creates the staging workload from Git.');
+          : 'Step 1 registers the Argo CD app and creates the workload from Git.');
     }
   }
 
@@ -395,16 +540,15 @@
 
   async function maybeAutoDeploy(d) {
     if (autoDeployAttempted || busy || demoInProgress) return;
-    if (d.staging_deployed || d.cluster !== 'ok') return;
+    if (isDeployed(d) || d.cluster !== 'ok') return;
     if (!autoDeployEnabled) return;
     if (new URLSearchParams(location.search).get('auto_deploy') === '0') return;
-    // Only auto-deploy on a clean slate (reset / first visit). Not during Step 2 outage.
-    if (!d.staging_clean) return;
+    if (!isClean(d)) return;
 
     autoDeployAttempted = true;
     log('Auto-deploy: clean slate — running Step 1', 'info');
-    opsTitle.textContent = 'Auto-deploying fastapi-staging…';
-    opsDetail.textContent = 'Registering Argo CD app and syncing from GitHub';
+    opsTitle.textContent = `Auto-deploying ${currentApp().label}…`;
+    opsDetail.textContent = 'Registering Argo CD app and syncing from Git';
     await onDeploy();
   }
 
@@ -443,18 +587,19 @@
     document.getElementById('statusGrid').innerHTML = items.map(([l, v, st]) =>
       `<div class="stat-card"><div class="stat-label">${l}</div><div class="stat-val" style="color:${statColor(st)}">${esc(v)}</div></div>`
     ).join('');
-    const healthy = !!d.staging_deployed;
+    const healthy = isDeployed(d);
     const badge = document.getElementById('liveBadge');
-    badge.textContent = healthy ? 'Systems healthy' : (d.staging_clean ? 'Clean slate' : 'Outage / not ready');
-    badge.className = 'badge' + (healthy ? '' : d.staging_clean ? ' warn' : ' err');
+    badge.textContent = healthy ? 'Systems healthy' : (isClean(d) ? 'Clean slate' : 'Outage / not ready');
+    badge.className = 'badge' + (healthy ? '' : isClean(d) ? ' warn' : ' err');
     applyDeployedState(d);
+    reconcileWizardStep(d);
   }
 
   async function refreshStatus() {
     if (busy || demoInProgress) return;
     if (statusFailCount >= 3) return;
     try {
-      const r = await fetch('/api/status');
+      const r = await fetch(appStatusUrl());
       if (!r.ok) throw new Error(`Status HTTP ${r.status}`);
       const j = await r.json();
       if (j.ok) {
@@ -549,7 +694,7 @@
 
   async function onDeploy() {
     try {
-      const d = await streamAction('/api/deploy/stream', 'Deploy fastapi-staging', 1);
+      const d = await streamAction(appStreamUrl('deploy'), currentApp().deployLabel, 1);
       if (!d) return;
       showResult(d.message, d.app_reachable ? 'ok' : 'err');
       if (d.architecture?.length) {
@@ -567,27 +712,30 @@
   async function onReset() {
     try {
       autoDeployAttempted = true;
+      resetLockUntil = Date.now() + 15000;
       const banner = document.getElementById('demoAlreadyLive');
       if (banner) banner.hidden = true;
-      const d = await streamAction('/api/reset/stream', 'Remove fastapi-staging', 'reset');
+      hideExplainReport();
+      const d = await streamAction(appStreamUrl('reset'), currentApp().resetLabel, 'reset');
       if (!d) return;
       demoInProgress = false;
-      const clean = !!d.staging_clean;
-      showResult(d.message, clean ? 'warn' : 'err');
+      const clean = !!(d.app_clean ?? d.staging_clean);
+      clearWizardStep();
       setWizardStep(1);
+      showResult(d.message, clean ? 'warn' : 'err');
       resetTheater();
       activatePhase('git', 'active');
       document.getElementById('btnDeploy').hidden = false;
       document.getElementById('btnContinue').hidden = true;
       document.getElementById('deployDetected').hidden = true;
-      opsTitle.textContent = clean ? 'Reset complete — staging down' : 'Reset finished — verify status';
+      opsTitle.textContent = clean ? 'Reset complete — app not registered' : 'Reset finished — verify status';
       opsDetail.textContent = clean
-        ? 'Not in Argo CD · workloads removed · health down. Click Deploy when ready.'
-        : 'Argo CD removed but some staging objects may remain — health down is expected. Click Deploy to bring the app back.';
+        ? 'Not in Argo CD · workloads removed · health down. Stay on Step 1 until you deploy again.'
+        : 'Argo CD removed but some objects may remain — health down is expected. Click Deploy to restore.';
       runnerIdle && (runnerIdle.textContent = 'Ready for Step 1 — Deploy');
-      log(clean ? 'Reset complete — clean slate' : 'Reset finished — staging down, deploy to restore', clean ? 'ok' : 'warn');
+      log(clean ? 'Reset complete — clean slate' : 'Reset finished — deploy to restore', clean ? 'ok' : 'warn');
       statusFailCount = 0;
-      setTimeout(refreshStatus, 5000);
+      setTimeout(refreshStatus, 3000);
     } catch (e) {
       showResult(e.message, 'err');
       setBusy(false);
@@ -599,7 +747,7 @@
 
   async function onOutage() {
     try {
-      const d = await streamAction('/api/outage/stream', 'Simulate outage', 2);
+      const d = await streamAction(appStreamUrl('outage'), 'Simulate outage', 2);
       if (!d) return;
       autoDeployAttempted = true;
       showResult(d.message, 'err');
@@ -613,7 +761,7 @@
 
   async function onExplain() {
     try {
-      const d = await streamAction('/api/explain/stream', 'Explain with AI', 3);
+      const d = await streamAction(appStreamUrl('explain'), 'Explain with AI', 3);
       if (!d) return;
       renderExplain(d);
       activatePhase('ai', 'done');
@@ -624,7 +772,7 @@
 
   async function onHeal() {
     try {
-      const d = await streamAction('/api/heal/stream', 'Auto-fix app', 4);
+      const d = await streamAction(appStreamUrl('heal'), 'Auto-fix app', 4);
       if (!d) return;
       showResult(d.message, d.app_reachable ? 'ok' : 'err');
       activatePhase('health', 'done');
@@ -654,7 +802,17 @@
   };
   document.getElementById('footerYear').textContent = new Date().getFullYear();
 
-  setWizardStep(1);
+  try {
+    const savedApp = sessionStorage.getItem(DEMO_APP_KEY);
+    if (savedApp && APP_CONFIG[savedApp]) selectedDemoApp = savedApp;
+  } catch (_) {}
+  updateAppChrome();
+  document.querySelectorAll('.demo-app-tab').forEach(btn => {
+    btn.addEventListener('click', () => switchDemoApp(btn.dataset.app));
+  });
+
+  wizardStep = loadWizardStep();
+  setWizardStep(wizardStep);
   loadConfig().then(refreshStatus);
   setInterval(refreshStatus, 20000);
 })();

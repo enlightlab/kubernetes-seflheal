@@ -28,6 +28,7 @@ KUBECONFIG = _env("KUBECONFIG")
 NAMESPACE = _env("NAMESPACE", "enlight-staging")
 ARGOCD_NAMESPACE = _env("ARGOCD_NAMESPACE", "argocd")
 ARGOCD_APP = _env("ARGOCD_APP", "fastapi-staging")
+NGINX_ARGOCD_APP = _env("NGINX_ARGOCD_APP", "nginx-staging")
 DEPLOYMENT_NAME = _env("DEPLOYMENT_NAME", "fastapi")
 CONTAINER_NAME = _env("CONTAINER_NAME", "api")
 POD_LABEL = _env("POD_LABEL", "app=fastapi")
@@ -76,6 +77,9 @@ PUBLIC_ARGOCD_APP_URL = _env(
         else ""
     ),
 )
+PUBLIC_NGINX_HEALTH_URL = _env("PUBLIC_NGINX_HEALTH_URL", "")
+PUBLIC_NGINX_DASHBOARD_URL = _env("PUBLIC_NGINX_DASHBOARD_URL", "")
+PUBLIC_NGINX_ARGOCD_APP_URL = _env("PUBLIC_NGINX_ARGOCD_APP_URL", "")
 
 # Manifest apply on heal — local path or bundled overlay in container
 _default_overlay = (
@@ -85,6 +89,10 @@ _default_overlay = (
 )
 HEAL_OVERLAY_PATH = Path(_env("HEAL_OVERLAY_PATH", _default_overlay))
 STAGING_APP_PATH = Path(_env("STAGING_APP_PATH", str(ROOT / "deploy" / "k8s" / "staging-app")))
+STAGING_NGINX_PATH = Path(_env("STAGING_NGINX_PATH", str(ROOT / "deploy" / "k8s" / "staging-nginx")))
+
+# Chat can run deploy / outage / heal without the guided demo wizard.
+CHAT_ACTIONS_ENABLED = _flag("CHAT_ACTIONS_ENABLED", True)
 
 K8SGPT_BIN = _env("K8SGPT_BIN", "k8sgpt")
 K8SGPT_TIMEOUT = int(_env("K8SGPT_TIMEOUT", "90"))
@@ -105,6 +113,8 @@ HOLMES_HTTP_URL = _env(
 )
 HOLMES_HTTP_MODEL = _env("HOLMES_HTTP_MODEL", "robusta")
 HOLMES_HTTP_TIMEOUT = int(_env("HOLMES_HTTP_TIMEOUT", "300"))
+# Chat page: use direct Gemini REST (reliable) instead of holmes CLI agent (LiteLLM+Gemini tool-loop bug).
+HOLMES_CHAT_DIRECT = _flag("HOLMES_CHAT_DIRECT", True)
 ROBUSTA_API_ENDPOINT = _env("ROBUSTA_API_ENDPOINT", "https://api.ap.robusta.dev")
 
 
@@ -115,17 +125,23 @@ def resolved_holmes_model() -> str:
     if HOLMES_MODEL and not HOLMES_MODEL.startswith(("openai/", "gemini/")):
         return HOLMES_MODEL
     if os.environ.get("GEMINI_API_KEY", "").strip():
-        return "gemini/gemini-3.5-flash"
+        return "gemini/gemini-2.5-flash"
     if os.environ.get("ANTHROPIC_API_KEY", "").strip():
         return "anthropic/claude-3-5-haiku-20241022"
     if os.environ.get("OPENAI_API_KEY", "").strip():
         return "openai/gpt-4o-mini"
-    return HOLMES_MODEL or "gemini/gemini-3.5-flash"
+    return HOLMES_MODEL or "gemini/gemini-2.5-flash"
 
 ARGOCD_APP_MANIFEST = Path(
     _env(
         "ARGOCD_APP_MANIFEST",
         str(ROOT / "deploy" / "k8s" / "argocd" / "fastapi-staging-app.yaml"),
+    )
+)
+NGINX_ARGOCD_APP_MANIFEST = Path(
+    _env(
+        "NGINX_ARGOCD_APP_MANIFEST",
+        str(ROOT / "deploy" / "k8s" / "argocd" / "nginx-staging-app.yaml"),
     )
 )
 
@@ -156,6 +172,68 @@ def public_links() -> dict[str, str]:
     }
 
 
+def public_app_links() -> dict[str, dict[str, str]]:
+    return {
+        "fastapi": {
+            "health": PUBLIC_APP_HEALTH_URL,
+            "dashboard": PUBLIC_APP_DASHBOARD_URL,
+            "argocd": PUBLIC_ARGOCD_URL,
+            "argocd_app": PUBLIC_ARGOCD_APP_URL,
+        },
+        "nginx": {
+            "health": PUBLIC_NGINX_HEALTH_URL,
+            "dashboard": PUBLIC_NGINX_DASHBOARD_URL,
+            "argocd": PUBLIC_ARGOCD_URL,
+            "argocd_app": PUBLIC_NGINX_ARGOCD_APP_URL,
+        },
+    }
+
+
+def demo_app(app_id: str) -> dict:
+    """Demo workload registry — used by chat-first deploy/outage/heal."""
+    apps = demo_apps()
+    key = (app_id or "fastapi").strip().lower()
+    if key not in apps:
+        raise ValueError(f"Unknown app {app_id!r} — try: {', '.join(apps)}")
+    return apps[key]
+
+
+def demo_apps() -> dict[str, dict]:
+    nginx_health = f"http://nginx-demo.{NAMESPACE}.svc.cluster.local/"
+    return {
+        "fastapi": {
+            "id": "fastapi",
+            "label": "FastAPI API",
+            "blurb": "Python API with GitOps via Argo CD",
+            "deployment": DEPLOYMENT_NAME,
+            "container": CONTAINER_NAME,
+            "pod_label": POD_LABEL,
+            "good_image": GOOD_IMAGE,
+            "bad_image": BAD_IMAGE,
+            "health_url": APP_HEALTH_CHECK_URL,
+            "gitops": True,
+            "argocd_app": ARGOCD_APP,
+            "argocd_manifest": ARGOCD_APP_MANIFEST,
+            "manifest_path": None,
+        },
+        "nginx": {
+            "id": "nginx",
+            "label": "Nginx Web",
+            "blurb": "Static web front-end with GitOps via Argo CD",
+            "deployment": "nginx-demo",
+            "container": "nginx",
+            "pod_label": "app=nginx-demo",
+            "good_image": "docker.io/library/nginx:1.27-alpine",
+            "bad_image": "docker.io/library/nginx:does-not-exist-tag",
+            "health_url": nginx_health,
+            "gitops": True,
+            "argocd_app": NGINX_ARGOCD_APP,
+            "argocd_manifest": NGINX_ARGOCD_APP_MANIFEST,
+            "manifest_path": STAGING_NGINX_PATH,
+        },
+    }
+
+
 def runtime_info() -> dict[str, str | bool]:
     return {
         "deploy_target": DEPLOY_TARGET,
@@ -171,5 +249,7 @@ def runtime_info() -> dict[str, str | bool]:
         "holmes_mode": HOLMES_MODE,
         "holmes_model": resolved_holmes_model() if HOLMES_ENABLED else HOLMES_MODEL,
         "holmes_http_url": HOLMES_HTTP_URL,
+        "chat_actions_enabled": CHAT_ACTIONS_ENABLED,
+        "demo_apps": list(demo_apps().keys()),
         **demo_credentials(),
     }

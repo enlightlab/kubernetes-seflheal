@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nginx-staging
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/enlightlab/kubernetes-seflheal.git
+    targetRevision: main
+    path: deploy/k8s/staging-nginx
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: enlight-staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      name: nginx-demo
+      jsonPointers:
+        - /spec/template/spec/containers/0/image
+    - kind: Service
+      name: nginx-demo
+      jsonPointers:
+        - /spec/clusterIP

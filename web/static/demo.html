@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Guided Demo — EnlightLab Self-Heal</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=13" />
 </head>
 <body>
   <div class="page-bg" aria-hidden="true"></div>
@@ -18,7 +18,7 @@
     <div class="topbar-actions">
       <span class="badge" id="liveBadge">Checking...</span>
       <a class="ghost-btn" href="/">Overview</a>
-      <a class="ghost-btn" href="/holmes">HolmesGPT chat</a>
+      <a class="ghost-btn" href="/chat">Agent chat</a>
       <a class="ghost-btn" id="linkGitOps" href="#" target="_blank">Open ArgoCD</a>
     </div>
   </header>
@@ -30,9 +30,20 @@
       <p class="section-sub">Click a step below — live cluster activity appears immediately underneath so your client sees cause and effect.</p>
     </div>
 
+    <div class="demo-app-picker" id="demoAppPicker" role="tablist" aria-label="Choose demo app">
+      <button type="button" class="demo-app-tab active" data-app="fastapi" role="tab" aria-selected="true">
+        <img src="/static/assets/logos/fastapi.svg" alt="" width="20" height="20" />
+        FastAPI staging
+      </button>
+      <button type="button" class="demo-app-tab" data-app="nginx" role="tab" aria-selected="false">
+        <img src="/static/assets/logos/kubernetes.svg" alt="" width="20" height="20" />
+        Nginx staging
+      </button>
+    </div>
+
     <div class="demo-already-live banner-info" id="demoAlreadyLive" hidden>
-      <strong>fastapi-staging is already in Argo CD</strong> (Synced / Healthy) — the demo starts at <strong>Step 2</strong>.
-      To show a full deploy from zero, click <strong>Reset — remove fastapi-staging</strong> first.
+      <strong id="demoAlreadyLiveTitle">App is already in Argo CD</strong> (Synced / Healthy) — the demo starts at <strong>Step 2</strong>.
+      To show a full deploy from zero, click <strong id="demoResetHint">Reset</strong> first.
     </div>
 
     <!-- Steps first: client clicks here -->
@@ -43,10 +54,10 @@
       </div>
       <div class="wizard-steps-row">
         <div class="wizard-step active" id="wiz1" data-step="1">
-          <div class="wizard-step-head"><span class="wizard-num">1</span><h4>Deploy fastapi-staging</h4></div>
-          <div class="deploy-detected" id="deployDetected" hidden>✓ fastapi-staging already in Argo CD</div>
+          <div class="wizard-step-head"><span class="wizard-num">1</span><h4 id="wiz1Title">Deploy app</h4></div>
+          <div class="deploy-detected" id="deployDetected" hidden>✓ App already in Argo CD</div>
           <p id="wiz1Desc">Register the Argo CD app from GitHub and sync workloads to the cluster.</p>
-          <button class="action-btn primary" id="btnDeploy" type="button">Deploy fastapi-staging →</button>
+          <button class="action-btn primary" id="btnDeploy" type="button">Deploy →</button>
           <button class="action-btn secondary" id="btnContinue" type="button" hidden>Continue to Step 2 →</button>
           <div class="step-live" id="stepLive1" hidden></div>
         </div>
@@ -133,7 +144,7 @@
             <p class="panel-muted argo-pass-hint" id="argoPassHint" style="margin-top:.45rem;font-size:.72rem"></p>
           </div>
           <div class="links-row" style="margin-top:.65rem" id="quickLinks">
-            <a id="linkAppDashboard" href="#" target="_blank">Staging app</a>
+            <a id="linkAppDashboard" href="#" target="_blank">Live app</a>
             <a id="linkAppHealth" href="#" target="_blank">Health API</a>
             <a id="linkArgoApp" href="#" target="_blank">ArgoCD app</a>
           </div>
@@ -141,8 +152,8 @@
 
         <div class="panel">
           <h3>Presenter prep</h3>
-          <p class="panel-muted" style="margin-bottom:.65rem">Reset removes fastapi-staging from Argo CD <strong>and</strong> deletes staging workloads so Step 1 is a true deploy from zero.</p>
-          <button class="action-btn secondary" id="btnReset" type="button">Reset — remove fastapi-staging</button>
+          <p class="panel-muted" style="margin-bottom:.65rem" id="resetHelp">Reset removes the GitOps app <strong>and</strong> deletes workloads so Step 1 is a true deploy from zero.</p>
+          <button class="action-btn secondary" id="btnReset" type="button">Reset app</button>
           <div class="step-live reset-live" id="resetLive" hidden></div>
         </div>
 
@@ -235,6 +246,6 @@
     <div class="footer-inner">© <span id="footerYear"></span> EnlightLab · Slack alerts available in production pipeline</div>
   </footer>
 
-  <script src="/static/demo.js"></script>
+  <script src="/static/demo.js?v=13"></script>
 </body>
 </html>

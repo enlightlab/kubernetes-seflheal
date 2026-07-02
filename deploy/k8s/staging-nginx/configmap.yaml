@@ -1,0 +1,144 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-demo-site
+  namespace: enlight-staging
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <title>Nginx Staging — Enlight Lab</title>
+      <style>
+        :root { color-scheme: light; --blue:#2557ff; --green:#16a34a; --bg:#f4f8ff; }
+        * { box-sizing: border-box; }
+        body {
+          margin: 0;
+          font-family: Inter, system-ui, sans-serif;
+          background: linear-gradient(180deg, #f8fbff 0%, #eef4ff 40%, #fff 100%);
+          color: #0f172a;
+        }
+        .topbar {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 1rem 1.5rem;
+          border-bottom: 1px solid #e2e8f0;
+          background: rgba(255,255,255,.9);
+        }
+        .brand { font-weight: 800; font-size: 1rem; }
+        .nav a {
+          margin-left: 1rem;
+          color: var(--blue);
+          text-decoration: none;
+          font-weight: 600;
+          font-size: .88rem;
+        }
+        .wrap { max-width: 920px; margin: 0 auto; padding: 2rem 1.25rem 3rem; }
+        .eyebrow {
+          display: inline-flex;
+          padding: .45rem .8rem;
+          border-radius: 999px;
+          background: rgba(37,87,255,.08);
+          color: var(--blue);
+          font-size: .75rem;
+          font-weight: 700;
+        }
+        h1 { font-size: clamp(2rem, 5vw, 3.2rem); line-height: 1.05; margin: 1rem 0; }
+        .lead { font-size: 1.05rem; line-height: 1.7; color: #475569; max-width: 680px; }
+        .status-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: .75rem;
+          margin: 1.5rem 0;
+        }
+        .status-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: .45rem;
+          padding: .55rem .85rem;
+          border-radius: 999px;
+          background: #dcfce7;
+          color: #166534;
+          font-size: .8rem;
+          font-weight: 700;
+        }
+        .status-pill::before {
+          content: '';
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: var(--green);
+        }
+        .grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          gap: 1rem;
+          margin-top: 1.5rem;
+        }
+        .card {
+          background: #fff;
+          border: 1px solid #dbe7ff;
+          border-radius: 20px;
+          padding: 1.1rem;
+          box-shadow: 0 16px 40px rgba(37, 87, 255, .08);
+        }
+        .card strong { display: block; margin-bottom: .35rem; }
+        .card p { margin: 0; color: #64748b; font-size: .9rem; line-height: 1.55; }
+        .actions { display: flex; flex-wrap: wrap; gap: .65rem; margin-top: 1.75rem; }
+        .btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: .75rem 1.15rem;
+          border-radius: 999px;
+          font-weight: 700;
+          text-decoration: none;
+          font-size: .88rem;
+        }
+        .btn-primary { background: var(--blue); color: #fff; }
+        .btn-ghost { border: 1px solid #dbe7ff; color: var(--blue); background: #fff; }
+      </style>
+    </head>
+    <body>
+      <header class="topbar">
+        <div class="brand">Enlight Lab · Nginx staging</div>
+        <nav class="nav">
+          <a href="https://selfheal.enlightlab.com/chat">Agent chat</a>
+          <a href="https://selfheal.enlightlab.com/demo">Guided demo</a>
+        </nav>
+      </header>
+      <main class="wrap">
+        <span class="eyebrow">GitOps app · nginx-staging · enlight-staging</span>
+        <h1>Your web front-end is live on Kubernetes.</h1>
+        <p class="lead">
+          This is the second demo workload in the self-heal MVP — deployed like FastAPI,
+          monitored from chat, breakable for demos, and recoverable with auto-fix.
+        </p>
+        <div class="status-row">
+          <span class="status-pill">Workload healthy</span>
+          <span class="status-pill" style="background:#dbeafe;color:#1d4ed8">Route: /nginx/</span>
+        </div>
+        <div class="grid">
+          <div class="card">
+            <strong>What this app is</strong>
+            <p>Static Nginx front-end used to show multi-app operations in the guided demo.</p>
+          </div>
+          <div class="card">
+            <strong>How it is deployed</strong>
+            <p>Argo CD application <code>nginx-staging</code> syncs manifests from Git.</p>
+          </div>
+          <div class="card">
+            <strong>What to try in chat</strong>
+            <p>Deploy nginx, show pod status, simulate outage, explain with AI, then auto-fix.</p>
+          </div>
+        </div>
+        <div class="actions">
+          <a class="btn btn-primary" href="https://selfheal.enlightlab.com/chat?prompt=Show%20pod%20status%20for%20nginx">Check pod status</a>
+          <a class="btn btn-ghost" href="https://selfheal.enlightlab.com/staging/">Open FastAPI staging</a>
+        </div>
+      </main>
+    </body>
+    </html>
