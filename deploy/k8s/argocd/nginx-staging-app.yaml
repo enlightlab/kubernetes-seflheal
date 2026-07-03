@@ -6,9 +6,10 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/enlightlab/kubernetes-seflheal.git
+    # Same public repo as fastapi-staging — push deploy/k8s/staging-nginx to this path in enlight-lab-platform
+    repoURL: https://github.com/kirtiprasad2003/enlight-lab-platform.git
     targetRevision: main
-    path: deploy/k8s/staging-nginx
+    path: demos/nginx-staging/overlays/oci
   destination:
     server: https://kubernetes.default.svc
     namespace: enlight-staging

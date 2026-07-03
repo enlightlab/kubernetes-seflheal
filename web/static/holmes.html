@@ -1,100 +1,197 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>HolmesGPT — EnlightLab</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/styles.css" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Enlight Lab — Kubernetes Agent</title>
+  <!-- ui-build: agent-v17 -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css?v=17" />
 </head>
-<body class="holmes-body">
-  <div class="page-bg" aria-hidden="true"></div>
+<body class="holmes-body agent-readiness" id="holmes-app">
+  <div class="readiness-bg" aria-hidden="true"></div>
 
-  <header class="topbar">
-    <a class="wordmark" href="/">
-      <img src="/static/assets/company-logo.png" alt="" onerror="this.style.display='none'" />
-      EnlightLab
+  <header class="readiness-header">
+    <a href="/" class="readiness-logo">
+      <img src="/static/assets/enlight-lab-mark.png" alt="" width="36" height="32" />
+      <span>Enlight Lab</span>
     </a>
-    <div class="topbar-actions">
-      <span class="badge" id="holmesStatus">Connecting…</span>
-      <a class="ghost-btn" href="/demo">Guided demo</a>
-      <a class="ghost-btn" href="/">Overview</a>
-    </div>
+    <nav class="readiness-nav">
+      <a href="/demo" class="readiness-nav-link">Guided demo</a>
+      <a href="/staging/" class="readiness-nav-link">Staging app</a>
+      <span id="holmes-status" class="readiness-status-pill">Ready</span>
+      <span id="gemini-chip" class="holmes-gemini-chip" hidden></span>
+    </nav>
   </header>
 
-  <div class="wrap holmes-page">
-    <div class="holmes-hero">
-      <div class="holmes-hero-icon" aria-hidden="true">🔍</div>
-      <div>
-        <div class="eyebrow">HolmesGPT · Agentic Kubernetes RCA</div>
-        <h1 class="section-title">Cluster intelligence chat</h1>
-        <p class="section-sub">
-          Instant answers from live telemetry · deep Holmes scans when you need RCA.
-          Read-only — never changes your cluster.
-        </p>
+  <main class="readiness-page">
+    <!-- Hero (AI Readiness style) -->
+    <section class="readiness-hero" id="agent-welcome">
+      <p class="readiness-eyebrow">Live cluster · Natural language · Client-ready demo</p>
+      <h1 class="readiness-title">How healthy is your Kubernetes staging?</h1>
+      <p class="readiness-lead">
+        Chat with your Kubernetes agent to <strong>deploy applications</strong>, <strong>check status on demand</strong>,
+        <strong>simulate outages</strong>, and <strong>auto-fix</strong> — the same flow as a 10-app fleet, demonstrated with two sample apps.
+      </p>
+
+      <div class="readiness-cta-row">
+        <button type="button" class="readiness-btn readiness-btn--primary" id="btn-start-chat">
+          Start chatting with the agent →
+        </button>
+        <button type="button" class="readiness-btn readiness-btn--ghost" data-prompt="What can you do?">
+          What can you do?
+        </button>
       </div>
-    </div>
 
-    <div class="holmes-layout">
-      <aside class="holmes-side panel">
-        <div class="holmes-health-card" id="healthCard">
-          <div class="holmes-health-pip" id="healthPip"></div>
-          <div class="holmes-health-title" id="healthTitle">Checking…</div>
-          <div class="holmes-health-sub" id="healthSub">—</div>
+      <div class="readiness-stats" aria-label="Platform highlights">
+        <div class="readiness-stat">
+          <strong>2</strong>
+          <span>Demo apps</span>
         </div>
+        <div class="readiness-stat">
+          <strong>4</strong>
+          <span>Core actions</span>
+        </div>
+        <div class="readiness-stat">
+          <strong>AI</strong>
+          <span>Diagnosis &amp; fix</span>
+        </div>
+        <div class="readiness-stat">
+          <strong>Live</strong>
+          <span>Real OKE cluster</span>
+        </div>
+      </div>
+    </section>
 
-        <div class="holmes-pills" id="argoPills"></div>
+    <!-- Four capabilities (like AI Readiness dimensions) -->
+    <section class="readiness-section">
+      <h2 class="readiness-section-title">Four capabilities in one chat</h2>
+      <p class="readiness-section-sub">Everything your manager demo needs — without clicking through a wizard first.</p>
+      <div class="readiness-grid">
+        <article class="readiness-card">
+          <div class="readiness-card-icon readiness-card-icon--blue" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </div>
+          <h3>Deploy</h3>
+          <p>Roll out FastAPI via GitOps, Nginx as a second app, or both at once — imagine deploying five or ten services by chat.</p>
+          <button type="button" class="readiness-card-btn" data-prompt="Deploy both apps">Deploy both apps →</button>
+        </article>
+        <article class="readiness-card">
+          <div class="readiness-card-icon readiness-card-icon--green" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 8v4l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </div>
+          <h3>Monitor</h3>
+          <p>Cluster snapshot appears when you ask — pod health, GitOps sync, and per-app state. No cluttered sidebar until you need it.</p>
+          <button type="button" class="readiness-card-btn" data-prompt="Show cluster status">Show cluster status →</button>
+        </article>
+        <article class="readiness-card">
+          <div class="readiness-card-icon readiness-card-icon--orange" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M13 2L3 14h8l-1 8 10-12h-8l1-8z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+          </div>
+          <h3>Break safely</h3>
+          <p>Inject a staging outage on purpose so you can show detection live in front of clients — bad image, crash, or scale-down.</p>
+          <button type="button" class="readiness-card-btn" data-prompt="Simulate outage on fastapi">Simulate outage →</button>
+        </article>
+        <article class="readiness-card">
+          <div class="readiness-card-icon readiness-card-icon--teal" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <h3>Fix with AI</h3>
+          <p>Ask what broke in plain English, get an AI explanation, then auto-remediate and verify health — all from the same chat.</p>
+          <button type="button" class="readiness-card-btn" data-prompt="Auto-fix">Auto-fix →</button>
+        </article>
+      </div>
+    </section>
 
-        <h3 class="holmes-side-title">Cluster snapshot</h3>
-        <dl class="holmes-meta">
-          <dt>Namespace</dt><dd id="metaNs">—</dd>
-          <dt>Deployment</dt><dd id="metaDep">—</dd>
-          <dt>Image</dt><dd id="metaImage" class="holmes-mono">—</dd>
-          <dt>Pod</dt><dd id="metaPod" class="holmes-mono">—</dd>
-          <dt>Model</dt><dd id="metaModel" class="holmes-mono">—</dd>
-        </dl>
-
-        <h3 class="holmes-side-title">Try asking</h3>
-        <div class="holmes-suggestions" id="holmesSuggestions"></div>
-
-        <button type="button" class="action-btn ghost-sm holmes-refresh" id="btnRefreshSnap">↻ Refresh snapshot</button>
-      </aside>
-
-      <main class="holmes-chat panel">
-        <div class="holmes-activity" id="holmesActivity" hidden>
-          <span class="holmes-activity-spin"></span>
+    <!-- How it works -->
+    <section class="readiness-section readiness-section--muted">
+      <h2 class="readiness-section-title">How it works</h2>
+      <ol class="readiness-steps">
+        <li>
+          <span class="readiness-step-num">1</span>
           <div>
-            <div class="holmes-activity-title" id="activityTitle">Working…</div>
-            <div class="holmes-activity-detail" id="activityDetail"></div>
+            <strong>Deploy from chat</strong>
+            <p>Say <em>deploy fastapi</em> or <em>deploy both apps</em>. The agent registers GitOps and brings workloads up on the live cluster.</p>
           </div>
-          <span class="holmes-activity-time" id="activityTime">0s</span>
-        </div>
-
-        <div class="holmes-messages" id="holmesMessages" aria-live="polite">
-          <div class="holmes-msg holmes-msg--bot">
-            <div class="holmes-msg-head">
-              <span class="holmes-msg-label">HolmesGPT</span>
-              <span class="holmes-source holmes-source--bot">Assistant</span>
-            </div>
-            <div class="holmes-msg-body">
-              Welcome. I read <strong>enlight-staging</strong> in real time.
-              Ask <em>“Is my pod healthy?”</em> for an instant answer, or describe an outage for a deep scan.
-            </div>
+        </li>
+        <li>
+          <span class="readiness-step-num">2</span>
+          <div>
+            <strong>Ask for status when you need it</strong>
+            <p>Say <em>show status</em> for a snapshot — FastAPI, Nginx, pods, and Argo CD sync in one view.</p>
           </div>
+        </li>
+        <li>
+          <span class="readiness-step-num">3</span>
+          <div>
+            <strong>Simulate a problem</strong>
+            <p>Say <em>simulate outage</em> to break staging safely, then <em>what broke?</em> for an AI root-cause explanation.</p>
+          </div>
+        </li>
+        <li>
+          <span class="readiness-step-num">4</span>
+          <div>
+            <strong>Auto-fix and verify</strong>
+            <p>Say <em>auto-fix</em> to restore the good image, re-sync GitOps, and confirm the app is healthy again.</p>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <!-- Demo commands -->
+    <section class="readiness-section">
+      <h2 class="readiness-section-title">Ready to run the demo?</h2>
+      <p class="readiness-section-sub">Pick a command below or type your own in the chat.</p>
+      <div class="readiness-action-grid">
+        <button type="button" class="readiness-action-btn" data-prompt="Deploy both apps">Deploy both apps</button>
+        <button type="button" class="readiness-action-btn" data-prompt="Show cluster status">Show status</button>
+        <button type="button" class="readiness-action-btn" data-prompt="Simulate outage on fastapi">Break FastAPI</button>
+        <button type="button" class="readiness-action-btn" data-prompt="What broke?">What broke?</button>
+        <button type="button" class="readiness-action-btn" data-prompt="Explain with AI">AI explain</button>
+        <button type="button" class="readiness-action-btn readiness-action-btn--primary" data-prompt="Auto-fix">Auto-fix</button>
+      </div>
+    </section>
+
+    <!-- Chat panel -->
+    <section class="readiness-chat-wrap" id="readiness-chat-wrap">
+      <div class="readiness-chat-head">
+        <h2 class="readiness-section-title">Agent chat</h2>
+        <p class="readiness-section-sub">Natural language control — deploy, diagnose, and heal without leaving this page.</p>
+      </div>
+      <div id="holmes-card" class="readiness-chat holmes-card holmes-card--chat" aria-label="Kubernetes agent chat">
+        <div id="holmes-messages-pane" class="holmes-messages-pane">
+          <div id="holmes-messages" class="holmes-messages" role="log" aria-live="polite">
+          <p id="chat-empty-hint" class="readiness-chat-empty">Your conversation appears here. Use a button above or type a command below.</p>
         </div>
+        </div>
+        <div id="holmes-activity" class="holmes-typing" hidden>
+          <span class="holmes-typing-dots"><span></span><span></span><span></span></span>
+          <span id="activity-text">Working…</span>
+        </div>
+        <div class="holmes-compose-wrap">
+          <form id="holmes-form" class="holmes-compose" autocomplete="off">
+            <label class="sr-only" for="holmes-input">Message to Kubernetes agent</label>
+            <input type="text" id="holmes-input" name="message"
+              placeholder="e.g. Deploy fastapi, show status, break nginx, auto-fix…"
+              required autocomplete="off" />
+            <button type="submit" id="holmes-send" class="holmes-send" aria-label="Send">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </form>
+        </div>
+      </div>
+    </section>
 
-        <form class="holmes-compose" id="holmesForm">
-          <textarea id="holmesInput" rows="2" placeholder="Ask about pod health, images, Argo CD, or root cause…" required></textarea>
-          <button class="action-btn primary holmes-send" type="submit" id="holmesSend">
-            <span class="holmes-send-label">Send</span>
-            <span aria-hidden="true">→</span>
-          </button>
-        </form>
-        <p class="holmes-footnote" id="holmesFootnote">Read-only kubectl · Deep scans may take 1–3 minutes</p>
-      </main>
-    </div>
-  </div>
+    <footer class="readiness-footer">
+      <p>Prefer click-by-click steps? <a href="/demo">Try the guided demo</a></p>
+      <span class="agent-ui-tag">UI v17</span>
+    </footer>
+  </main>
 
-  <script src="/static/holmes.js"></script>
+  <script src="/static/holmes.js?v=17"></script>
 </body>
 </html>

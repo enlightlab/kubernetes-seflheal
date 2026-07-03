@@ -147,7 +147,21 @@ def api_ui_version() -> JSONResponse:
     """Verify which UI build is mounted in the running pod."""
     home = (STATIC / "home.html").read_text(encoding="utf-8", errors="replace")
     chat = (STATIC / "chat.html").read_text(encoding="utf-8", errors="replace")
-    if "agent-v18" in home and "agent-v18" in chat:
+    if "agent-v25" in chat:
+        ui_build = "agent-v25"
+    elif "agent-v24" in chat:
+        ui_build = "agent-v24"
+    elif "agent-v23" in chat:
+        ui_build = "agent-v23"
+    elif "agent-v22" in chat:
+        ui_build = "agent-v22"
+    elif "agent-v21" in chat:
+        ui_build = "agent-v21"
+    elif "agent-v20" in chat:
+        ui_build = "agent-v20"
+    elif "agent-v19" in home and "agent-v19" in chat:
+        ui_build = "agent-v19"
+    elif "agent-v18" in home and "agent-v18" in chat:
         ui_build = "agent-v18"
     elif "agent-v17" in home or "agent-v17" in chat:
         ui_build = "agent-v17"
@@ -161,7 +175,10 @@ def api_ui_version() -> JSONResponse:
         "ok": True,
         "ui_build": ui_build,
         "has_sidebar": "holmes-sidebar" in chat or "holmes-sidebar" in home,
-        "chat_separate": "chat-page-main" in chat,
+        "chat_separate": "chat-page-main" in chat or "chat-deck-main" in chat,
+        "chat_simple": "agent-chat-simple" in chat,
+        "chat_deck": "agent-chat-deck" in chat,
+        "chat_mvp": "ccd-page" in chat or "agent-v25" in chat,
         "home_page": "home-app" in home,
     })
 

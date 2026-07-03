@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Enlight Lab — Kubernetes Self-Heal</title>
+  <!-- ui-build: agent-v22 -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css?v=21" />
+</head>
+<body class="holmes-body agent-readiness" id="home-app">
+  <div class="readiness-bg" aria-hidden="true"></div>
+
+  <header class="readiness-header">
+    <a href="/" class="readiness-logo">
+      <img src="/static/assets/enlight-lab-mark.png" alt="" width="36" height="32" />
+      <span>Enlight Lab</span>
+    </a>
+    <nav class="readiness-nav">
+      <a href="/chat" class="readiness-nav-link readiness-nav-link--primary">Agent chat</a>
+      <a href="/demo" class="readiness-nav-link">Guided demo</a>
+      <a href="/staging/" class="readiness-nav-link" target="_blank" rel="noopener noreferrer">FastAPI app ↗</a>
+      <a href="/nginx/" class="readiness-nav-link" target="_blank" rel="noopener noreferrer">Nginx app ↗</a>
+    </nav>
+  </header>
+
+  <main class="readiness-page">
+    <section class="readiness-hero">
+      <p class="readiness-eyebrow">Live cluster · Natural language · Client-ready demo</p>
+      <h1 class="readiness-title">What happens when a bad deploy takes your apps down?</h1>
+      <p class="readiness-lead">
+        Talk to your Kubernetes agent to <strong>deploy workloads</strong>, <strong>check health on demand</strong>,
+        <strong>simulate real failures</strong>, and <strong>auto-fix</strong> — the same flow you'd run across a full fleet,
+        shown here with two sample applications.
+      </p>
+
+      <div class="readiness-cta-row">
+        <a href="/chat" class="readiness-btn readiness-btn--primary">
+          Start chatting with the agent →
+        </a>
+        <a href="/chat?prompt=What%20can%20you%20do%3F" class="readiness-btn readiness-btn--ghost">
+          What can you do?
+        </a>
+      </div>
+
+      <div class="readiness-stats" aria-label="Platform highlights">
+        <div class="readiness-stat">
+          <strong>2</strong>
+          <span>Demo apps</span>
+        </div>
+        <div class="readiness-stat">
+          <strong>4</strong>
+          <span>Core actions</span>
+        </div>
+        <div class="readiness-stat">
+          <strong>AI</strong>
+          <span>Diagnosis &amp; fix</span>
+        </div>
+        <div class="readiness-stat">
+          <strong>Live</strong>
+          <span>Real workloads</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="readiness-section">
+      <h2 class="readiness-section-title">Four capabilities in one agent</h2>
+      <p class="readiness-section-sub">Everything your demo needs — deploy, observe, break, and heal without a long setup.</p>
+      <div class="readiness-grid">
+        <article class="readiness-card">
+          <div class="readiness-card-icon readiness-card-icon--blue" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </div>
+          <h3>Deploy</h3>
+          <p>Roll out FastAPI via GitOps, Nginx as a second app, or both at once — imagine shipping five or ten services by chat.</p>
+          <a href="/chat?prompt=Deploy%20both%20apps" class="readiness-card-btn">Deploy both apps →</a>
+        </article>
+        <article class="readiness-card">
+          <div class="readiness-card-icon readiness-card-icon--green" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 8v4l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </div>
+          <h3>Monitor</h3>
+          <p>Ask for a cluster snapshot when you need it — pod health, GitOps sync, and per-app state without a cluttered dashboard.</p>
+          <a href="/chat?prompt=Show%20cluster%20status" class="readiness-card-btn">Show cluster status →</a>
+        </article>
+        <article class="readiness-card">
+          <div class="readiness-card-icon readiness-card-icon--orange" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M13 2L3 14h8l-1 8 10-12h-8l1-8z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+          </div>
+          <h3>Break safely</h3>
+          <p>Inject a controlled outage on purpose — bad image, crash, or scale-down — so you can show detection live in front of clients.</p>
+          <a href="/chat?prompt=Simulate%20outage%20on%20fastapi" class="readiness-card-btn">Simulate outage →</a>
+        </article>
+        <article class="readiness-card">
+          <div class="readiness-card-icon readiness-card-icon--teal" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <h3>Fix with AI</h3>
+          <p>Ask what broke in plain English, get an AI explanation, then auto-remediate and verify health — all from the same chat.</p>
+          <a href="/chat?prompt=Auto-fix" class="readiness-card-btn">Auto-fix →</a>
+        </article>
+      </div>
+    </section>
+
+    <section class="readiness-section readiness-section--muted">
+      <h2 class="readiness-section-title">How it works</h2>
+      <ol class="readiness-steps">
+        <li>
+          <span class="readiness-step-num">1</span>
+          <div>
+            <strong>Deploy from chat</strong>
+            <p>Say <em>deploy fastapi</em> or <em>deploy both apps</em>. The agent registers GitOps and brings workloads up on the live cluster.</p>
+          </div>
+        </li>
+        <li>
+          <span class="readiness-step-num">2</span>
+          <div>
+            <strong>Ask for status when you need it</strong>
+            <p>Say <em>show status</em> for a snapshot — FastAPI, Nginx, pods, and Argo CD sync in one view.</p>
+          </div>
+        </li>
+        <li>
+          <span class="readiness-step-num">3</span>
+          <div>
+            <strong>Simulate a problem</strong>
+            <p>Say <em>simulate outage</em> to break the app safely, then <em>what broke?</em> for an AI root-cause explanation.</p>
+          </div>
+        </li>
+        <li>
+          <span class="readiness-step-num">4</span>
+          <div>
+            <strong>Auto-fix and verify</strong>
+            <p>Say <em>auto-fix</em> to restore the good image, re-sync GitOps, and confirm the app is healthy again.</p>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <section class="readiness-section">
+      <h2 class="readiness-section-title">Ready to run the demo?</h2>
+      <p class="readiness-section-sub">Pick a command below — each opens the agent chat with that prompt ready to send.</p>
+      <div class="readiness-action-grid">
+        <a href="/chat?prompt=Deploy%20both%20apps" class="readiness-action-btn">Deploy both apps</a>
+        <a href="/chat?prompt=Show%20cluster%20status" class="readiness-action-btn">Show status</a>
+        <a href="/chat?prompt=Simulate%20outage%20on%20fastapi" class="readiness-action-btn">Break FastAPI</a>
+        <a href="/chat?prompt=What%20broke%3F" class="readiness-action-btn">What broke?</a>
+        <a href="/chat?prompt=Explain%20with%20AI" class="readiness-action-btn">AI explain</a>
+        <a href="/chat?prompt=Auto-fix" class="readiness-action-btn readiness-action-btn--primary">Auto-fix</a>
+      </div>
+    </section>
+
+    <footer class="readiness-footer">
+      <p>Prefer click-by-click steps? <a href="/demo">Try the guided demo</a> · <a href="/chat">Open agent chat</a></p>
+      <span class="agent-ui-tag">UI v21</span>
+    </footer>
+  </main>
+</body>
+</html>

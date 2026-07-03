@@ -203,12 +203,20 @@
     logEl.prepend(line);
   }
 
-  function isValidDemoUrl(url) {
-    if (!url || url === '#') return false;
+  function resolveDemoUrl(url) {
+    if (!url || url === '#') return '';
+    const s = String(url).trim();
+    if (s.startsWith('/')) return `${window.location.origin}${s}`;
     try {
-      const p = new URL(String(url).trim());
-      return /^https?:\/\//i.test(url) && p.hostname && !/localhost|example\.com|cluster\.local/i.test(url);
-    } catch (_) { return false; }
+      const p = new URL(s);
+      if (!/^https?:\/\//i.test(s) || !p.hostname) return '';
+      if (/localhost|example\.com|cluster\.local/i.test(p.hostname)) return '';
+      return s;
+    } catch (_) { return ''; }
+  }
+
+  function isValidDemoUrl(url) {
+    return !!resolveDemoUrl(url);
   }
 
   function applyLinks(links) {
@@ -216,10 +224,10 @@
     ['linkGitOps:argocd', 'linkAppHealth:app_health', 'linkAppDashboard:app_dashboard', 'linkArgoApp:argocd_app'].forEach(pair => {
       const [id, key] = pair.split(':');
       const el = document.getElementById(id);
-      const url = links[key];
+      const url = resolveDemoUrl(links[key]);
       if (!el) return;
-      if (!isValidDemoUrl(url)) { el.href = '#'; el.dataset.disabled = '1'; }
-      else { el.href = url; delete el.dataset.disabled; }
+      if (!url) { el.href = '#'; el.dataset.disabled = '1'; el.setAttribute('aria-disabled', 'true'); }
+      else { el.href = url; delete el.dataset.disabled; el.removeAttribute('aria-disabled'); }
     });
   }
 
@@ -458,7 +466,7 @@
     const tree = d.argocd_tree || {};
     badges.innerHTML = [
       d.root_cause ? `<span class="explain-badge cause">Root cause: ${esc(d.root_cause)}</span>` : '',
-      `<span class="explain-badge sync">k8sgpt</span>`,
+      d.k8sgpt_ok !== false ? `<span class="explain-badge sync">k8sgpt</span>` : '',
       d.holmes_ok ? `<span class="explain-badge holmes">HolmesGPT</span>` : '',
       tree.sync_status ? `<span class="explain-badge sync">Sync: ${esc(tree.sync_status)}</span>` : '',
       tree.health_status ? `<span class="explain-badge ${healthClass(tree.health_status)}">Health: ${esc(tree.health_status)}</span>` : '',
@@ -578,9 +586,10 @@
     if (d.links) applyLinks(d.links);
     const pod = String(d.pod || '');
     const podOk = pod.includes('1/1') && pod.includes('Running');
+    const healthOk = d.app_health === 'ok' || d.app_health_check === 'ok' || (podOk && isDeployed(d));
     const statColor = (st) => (st === 'ok' ? 'var(--green)' : st === 'warn' ? '#b45309' : 'var(--red)');
     const items = [
-      ['App', d.app_health === 'ok' ? 'Up' : 'Down', d.app_health === 'ok' ? 'ok' : 'fail'],
+      ['App', healthOk ? 'Up' : 'Down', healthOk ? 'ok' : 'fail'],
       ['Argo CD', d.argocd_app_exists ? 'Registered' : 'None', d.argocd_app_exists ? 'ok' : 'warn'],
       ['Pod', podOk ? 'Running' : (pod.includes('no pods') ? 'None' : 'Down'), podOk ? 'ok' : 'fail'],
     ];

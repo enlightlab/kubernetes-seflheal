@@ -80,6 +80,9 @@ PUBLIC_ARGOCD_APP_URL = _env(
 PUBLIC_NGINX_HEALTH_URL = _env("PUBLIC_NGINX_HEALTH_URL", "")
 PUBLIC_NGINX_DASHBOARD_URL = _env("PUBLIC_NGINX_DASHBOARD_URL", "")
 PUBLIC_NGINX_ARGOCD_APP_URL = _env("PUBLIC_NGINX_ARGOCD_APP_URL", "")
+# Browser-facing UI hostname (ingress / LB). Used when in-cluster LB discovery is empty.
+PUBLIC_UI_BASE_URL = _env("PUBLIC_UI_BASE_URL", "https://selfheal.enlightlab.com")
+PUBLIC_ARGOCD_HOST = _env("PUBLIC_ARGOCD_HOST", "https://argocd.enlightlab.com")
 
 # Manifest apply on heal — local path or bundled overlay in container
 _default_overlay = (
@@ -144,6 +147,83 @@ NGINX_ARGOCD_APP_MANIFEST = Path(
         str(ROOT / "deploy" / "k8s" / "argocd" / "nginx-staging-app.yaml"),
     )
 )
+
+_EMBEDDED_FASTAPI_ARGOCD_APP = """\
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: fastapi-staging
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kirtiprasad2003/enlight-lab-platform.git
+    targetRevision: main
+    path: demos/demo2-chat-to-deploy/overlays/oci
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: enlight-staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      name: fastapi
+      jsonPointers:
+        - /spec/template/spec/containers/0/image
+    - kind: Service
+      name: fastapi
+      jsonPointers:
+        - /metadata/labels
+        - /spec/clusterIP
+"""
+
+_EMBEDDED_NGINX_ARGOCD_APP = """\
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nginx-staging
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kirtiprasad2003/enlight-lab-platform.git
+    targetRevision: main
+    path: demos/nginx-staging/overlays/oci
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: enlight-staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      name: nginx-demo
+      jsonPointers:
+        - /spec/template/spec/containers/0/image
+    - kind: Service
+      name: nginx-demo
+      jsonPointers:
+        - /spec/clusterIP
+"""
+
+
+def _manifest_yaml(path: Path, embedded: str) -> str:
+    if path.is_file():
+        return path.read_text(encoding="utf-8")
+    return embedded.strip()
+
+
+FASTAPI_ARGOCD_APP_YAML = _manifest_yaml(ARGOCD_APP_MANIFEST, _EMBEDDED_FASTAPI_ARGOCD_APP)
+NGINX_ARGOCD_APP_YAML = _manifest_yaml(NGINX_ARGOCD_APP_MANIFEST, _EMBEDDED_NGINX_ARGOCD_APP)
 
 ARGOCD_DISPLAY_USER = _env("ARGOCD_DISPLAY_USER", "admin")
 ARGOCD_DISPLAY_PASSWORD = _env("ARGOCD_DISPLAY_PASSWORD", "")

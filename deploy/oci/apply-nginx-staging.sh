@@ -38,10 +38,13 @@ kubectl -n enlight-staging delete pods -l app=nginx-demo --force --grace-period=
 sleep 5
 
 echo ""
-echo "=== 4. Trigger Argo sync (optional — needs GitHub path on main) ==="
+echo "=== 4. Trigger Argo sync (Git path: demos/nginx-staging/overlays/oci) ==="
 kubectl -n argocd annotate application nginx-staging argocd.argoproj.io/refresh=hard --overwrite 2>/dev/null || true
 kubectl -n argocd patch application nginx-staging --type merge -p \
   '{"operation":{"initiatedBy":{"username":"selfheal-ui"},"sync":{"revision":"HEAD"}}}' 2>/dev/null || true
+sleep 8
+kubectl -n argocd get application nginx-staging \
+  -o jsonpath='sync={.status.sync.status} health={.status.health.status}{"\n"}' 2>/dev/null || true
 
 echo ""
 echo "Current image on deployment:"
@@ -71,5 +74,5 @@ echo ""
 echo "Nginx UI (via selfheal LB): http://${UI_IP:-selfheal.enlightlab.com}/nginx/"
 echo "FastAPI UI:                 http://${UI_IP:-selfheal.enlightlab.com}/staging/"
 echo ""
-echo "NOTE: Argo CD syncs from GitHub deploy/k8s/staging-nginx on kubernetes-seflheal."
-echo "      Push this repo to GitHub main or Argo may show OutOfSync after local edits."
+echo "NOTE: Argo CD syncs demos/nginx-staging/overlays/oci from enlight-lab-platform (same repo as fastapi-staging)."
+echo "      Copy demos/nginx-staging/ to that GitHub repo main branch, then refresh nginx-staging in Argo CD."

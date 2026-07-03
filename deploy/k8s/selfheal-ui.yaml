@@ -83,7 +83,7 @@ data:
   # Enable HolmesGPT after storing gemini-api-key in secret k8sgpt-ai — run deploy/oci/setup-holmes.sh
   HOLMES_ENABLED: "false"
   HOLMES_MODE: "cli"
-  HOLMES_MODEL: "gemini/gemini-3.5-flash"
+  HOLMES_MODEL: "gemini/gemini-2.5-flash"
   HOLMES_TIMEOUT: "300"
   HOLMES_MAX_STEPS: "10"
   HOLMES_CHAT_MAX_STEPS: "8"

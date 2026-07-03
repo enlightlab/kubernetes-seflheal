@@ -41,7 +41,7 @@ if [ -n "${GEMINI_API_KEY:-}" ]; then
   kubectl -n "$NS" create secret generic k8sgpt-ai \
     --from-literal=gemini-api-key="$GEMINI_API_KEY" \
     --dry-run=client -o yaml | kubectl apply -f -
-  HOLMES_MODEL="gemini/gemini-3.5-flash"
+  HOLMES_MODEL="gemini/gemini-2.5-flash"
 elif [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   kubectl -n "$NS" create secret generic k8sgpt-ai \
     --from-literal=anthropic-api-key="$ANTHROPIC_API_KEY" \

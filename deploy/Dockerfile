@@ -32,6 +32,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY web/ /app/web/
 COPY deploy/k8s/staging-heal/ /app/deploy/k8s/staging-heal/
 COPY deploy/k8s/staging-app/ /app/deploy/k8s/staging-app/
+COPY deploy/k8s/staging-nginx/ /app/deploy/k8s/staging-nginx/
 COPY deploy/k8s/argocd/ /app/deploy/k8s/argocd/
 
 ENV DEPLOY_TARGET=oci \

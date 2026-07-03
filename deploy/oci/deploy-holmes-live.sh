@@ -45,12 +45,17 @@ if ! grep -q 'holmes-typing--visible' web/static/holmes.js; then
   echo "ERROR: holmes.js is old (missing thinking-indicator fix) — re-pack from Windows."
   exit 1
 fi
-if ! grep -q 'agent-v18' web/static/home.html; then
-  echo "ERROR: home.html is not agent-v18 — re-pack from Windows."
+if ! grep -q 'agent-v25' web/static/chat.html; then
+  echo "ERROR: chat.html is not agent-v25 — re-pack from Windows and re-upload holmes-deploy.tar.gz"
   exit 1
 fi
-if ! grep -q 'chat-page-main' web/static/chat.html; then
-  echo "ERROR: chat.html missing dedicated chat page — re-pack from Windows."
+if ! grep -q 'ccd-page' web/static/chat.html; then
+  echo "ERROR: chat.html missing MVP operator UI — re-pack from Windows."
+  exit 1
+fi
+echo "Packaged chat UI: $(grep -o 'agent-v[0-9]*' web/static/chat.html | head -1) (expect agent-v25 + ccd-page)"
+if ! grep -q 'ccd-main' web/static/chat.html; then
+  echo "ERROR: chat.html missing MVP layout — re-pack from Windows."
   exit 1
 fi
 if grep -q 'id="holmes-sidebar"' web/static/home.html || grep -q 'id="holmes-sidebar"' web/static/chat.html; then
@@ -81,8 +86,8 @@ if ! grep -q '_fetch_pods_structured' web/actions.py; then
   echo "ERROR: web/actions.py missing accurate pod telemetry — re-upload from Windows."
   exit 1
 fi
-if ! grep -q '_demo_rca_fallback_reply' web/actions.py; then
-  echo "ERROR: web/actions.py missing RCA fallback — re-upload from Windows."
+if ! grep -q 'NGINX_ARGOCD_APP_YAML' web/config.py; then
+  echo "ERROR: config.py missing embedded nginx Argo manifest — re-pack from Windows."
   exit 1
 fi
 
@@ -99,7 +104,13 @@ kubectl -n "$NS" create configmap selfheal-holmes-overlay \
   --from-file=chat.html=web/static/chat.html \
   --from-file=holmes.js=web/static/holmes.js \
   --from-file=styles.css=web/static/styles.css \
-  --from-file=enlight-lab-mark.png=web/static/assets/enlight-lab-mark.png
+  --from-file=enlight-lab-mark.png=web/static/assets/enlight-lab-mark.png \
+  --from-file=nginx-staging-app.yaml=deploy/k8s/argocd/nginx-staging-app.yaml
+
+echo "=== 1b. Nginx workload manifests (for in-chat deploy without image rebuild) ==="
+kubectl -n "$NS" delete configmap selfheal-nginx-k8s --ignore-not-found
+kubectl -n "$NS" create configmap selfheal-nginx-k8s \
+  --from-file=deploy/k8s/staging-nginx/
 
 echo "=== 2. Enable Holmes + gemini-2.5-flash ==="
 kubectl -n "$NS" patch configmap selfheal-ui-config --type merge -p '{
@@ -109,6 +120,10 @@ kubectl -n "$NS" patch configmap selfheal-ui-config --type merge -p '{
     "HOLMES_MODEL": "gemini/gemini-2.5-flash",
     "HOLMES_CHAT_DIRECT": "true",
     "CHAT_ACTIONS_ENABLED": "true",
+    "PUBLIC_UI_BASE_URL": "https://selfheal.enlightlab.com",
+    "PUBLIC_ARGOCD_HOST": "https://argocd.enlightlab.com",
+    "PUBLIC_NGINX_DASHBOARD_URL": "https://selfheal.enlightlab.com/nginx/",
+    "PUBLIC_NGINX_HEALTH_URL": "https://selfheal.enlightlab.com/nginx/",
     "TOOL_SCHEMA_NO_PARAM_OBJECT_IF_NO_PARAMS": "true",
     "HOLMES_TIMEOUT": "300",
     "HOLMES_MAX_STEPS": "10",
@@ -133,8 +148,11 @@ else
       {"name":"holmes-overlay","mountPath":"/app/web/static/chat.html","subPath":"chat.html"},
       {"name":"holmes-overlay","mountPath":"/app/web/static/holmes.js","subPath":"holmes.js"},
       {"name":"holmes-overlay","mountPath":"/app/web/static/styles.css","subPath":"styles.css"},
-      {"name":"holmes-overlay","mountPath":"/app/web/static/assets/enlight-lab-mark.png","subPath":"enlight-lab-mark.png"}
-    ]}
+      {"name":"holmes-overlay","mountPath":"/app/web/static/assets/enlight-lab-mark.png","subPath":"enlight-lab-mark.png"},
+      {"name":"holmes-overlay","mountPath":"/app/deploy/k8s/argocd/nginx-staging-app.yaml","subPath":"nginx-staging-app.yaml"},
+      {"name":"nginx-k8s","mountPath":"/app/deploy/k8s/staging-nginx"}
+    ]},
+    {"op":"add","path":"/spec/template/spec/volumes/-","value":{"name":"nginx-k8s","configMap":{"name":"selfheal-nginx-k8s"}}}
   ]'
 fi
 
@@ -154,6 +172,17 @@ if ! kubectl -n "$NS" get deployment selfheal-ui -o json | grep -q '/app/web/sta
     {"op":"add","path":"/spec/template/spec/containers/0/volumeMounts/-","value":
       {"name":"holmes-overlay","mountPath":"/app/web/static/chat.html","subPath":"chat.html"}}
   ]' || echo "WARN: could not add home/chat mounts — check deployment volumeMounts manually"
+fi
+
+echo "=== 3e. Ensure nginx manifest mounts (v19+) ==="
+if ! kubectl -n "$NS" get deployment selfheal-ui -o json | grep -q 'nginx-staging-app.yaml'; then
+  kubectl -n "$NS" patch deployment selfheal-ui --type=json -p='[
+    {"op":"add","path":"/spec/template/spec/volumes/-","value":{"name":"nginx-k8s","configMap":{"name":"selfheal-nginx-k8s"}}},
+    {"op":"add","path":"/spec/template/spec/containers/0/volumeMounts/-","value":
+      {"name":"holmes-overlay","mountPath":"/app/deploy/k8s/argocd/nginx-staging-app.yaml","subPath":"nginx-staging-app.yaml"}},
+    {"op":"add","path":"/spec/template/spec/containers/0/volumeMounts/-","value":
+      {"name":"nginx-k8s","mountPath":"/app/deploy/k8s/staging-nginx"}}
+  ]' || echo "WARN: could not add nginx manifest mounts — embedded YAML fallback still works"
 fi
 
 echo "=== 3d. Remove stale holmes.html mount (old v17 overlay) ==="
@@ -246,14 +275,14 @@ if [ -z "${POD:-}" ]; then
   echo "ERROR: no running selfheal-ui pod found"
   exit 1
 fi
-kubectl -n "$NS" exec "$POD" -- grep -c agent-v18 /app/web/static/home.html
-kubectl -n "$NS" exec "$POD" -- grep -c chat-page-main /app/web/static/chat.html
+kubectl -n "$NS" exec "$POD" -- grep -c agent-v25 /app/web/static/chat.html
+kubectl -n "$NS" exec "$POD" -- grep -c ccd-page /app/web/static/chat.html
 kubectl -n "$NS" exec "$POD" -- sh -c '! grep -q holmes-sidebar /app/web/static/home.html' && echo "no legacy sidebar: ok"
 
 echo ""
 echo "Done. Home: https://selfheal.enlightlab.com/  Chat: https://selfheal.enlightlab.com/chat"
 echo "Verify: curl -s https://selfheal.enlightlab.com/api/ui-version | jq ."
-echo "       (expect ui_build: agent-v18, chat_separate: true)"
+echo "       (expect ui_build: agent-v25, chat_mvp: true)"
 echo ""
 if [ -f deploy/oci/apply-nginx-staging.sh ]; then
   echo "Nginx GitOps (second app): bash deploy/oci/apply-nginx-staging.sh"
