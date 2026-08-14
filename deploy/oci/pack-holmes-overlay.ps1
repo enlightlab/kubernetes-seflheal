@@ -29,8 +29,7 @@ try {
     Write-Host "Upload to Cloud Shell, then:"
     Write-Host "  cd ~ && rm -rf devops-selfheal && mkdir devops-selfheal"
     Write-Host "  tar -xzf ~/holmes-deploy.tar.gz -C devops-selfheal"
-    Write-Host "  cd devops-selfheal && bash apply-holmes.sh"
-    Write-Host "Or if already extracted: bash deploy/oci/apply-holmes.sh"
+    Write-Host "  cd devops-selfheal && bash deploy/oci/deploy-holmes-live.sh"
 } finally {
     Pop-Location
 }

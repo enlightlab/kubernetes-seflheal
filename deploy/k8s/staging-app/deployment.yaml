@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: bom.ocir.io/bmitpaosivqx/enlight-fastapi:demo-pass
+          image: kirtiprasad2003/enlight-fastapi:demo-pass
           imagePullPolicy: Always
           ports:
             - containerPort: 8000

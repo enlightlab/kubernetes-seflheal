@@ -4,18 +4,91 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Enlight Lab — Kubernetes Self-Heal</title>
-  <!-- ui-build: agent-v22 -->
+  <!-- ui-build: agent-v77 -->
+  <style id="home-centered">
+    html { font-size: 18px; -webkit-text-size-adjust: 100%; }
+    html, body, #home-app {
+      width: 100%; margin: 0; min-height: 100vh;
+    }
+    .readiness-page {
+      max-width: 1280px !important;
+      width: 100% !important;
+      margin-left: auto !important;
+      margin-right: auto !important;
+      box-sizing: border-box;
+      padding-left: clamp(24px, 4vw, 48px) !important;
+      padding-right: clamp(24px, 4vw, 48px) !important;
+    }
+    .readiness-header {
+      width: 100% !important;
+      padding-left: clamp(24px, 5vw, 80px) !important;
+      padding-right: clamp(24px, 5vw, 80px) !important;
+    }
+    .readiness-hero {
+      text-align: center !important;
+      padding: 2.5rem 0 2rem !important;
+    }
+    .readiness-title {
+      font-size: clamp(2.25rem, 4vw, 3.5rem) !important;
+      text-align: center !important;
+    }
+    .readiness-lead {
+      font-size: 1.15rem !important;
+      text-align: center !important;
+      line-height: 1.7 !important;
+      max-width: 720px !important;
+      margin-left: auto !important;
+      margin-right: auto !important;
+    }
+    .readiness-cta-row { justify-content: center !important; }
+    .readiness-section-title { text-align: center !important; font-size: 1.75rem !important; }
+    .readiness-section-sub {
+      text-align: center !important;
+      font-size: 1rem !important;
+      max-width: 640px !important;
+      margin-left: auto !important;
+      margin-right: auto !important;
+    }
+    .readiness-grid { grid-template-columns: repeat(4, 1fr) !important; gap: 1.25rem !important; }
+    .readiness-steps {
+      display: grid !important;
+      grid-template-columns: repeat(2, 1fr) !important;
+      gap: 1.25rem !important;
+      max-width: 960px !important;
+      margin-left: auto !important;
+      margin-right: auto !important;
+    }
+    .readiness-steps li {
+      background: #fff;
+      border: 1px solid #e8eef7;
+      border-radius: 16px;
+      padding: 1.25rem;
+    }
+    .readiness-action-grid { justify-content: center !important; gap: .75rem !important; }
+    .readiness-footer { text-align: center !important; }
+    .readiness-action-btn { font-size: .95rem !important; padding: .75rem 1.35rem !important; }
+    .readiness-card p { font-size: .95rem !important; }
+    .readiness-card h3 { font-size: 1.1rem !important; }
+    @media (max-width: 900px) {
+      .readiness-grid { grid-template-columns: 1fr 1fr !important; }
+      .readiness-steps { grid-template-columns: 1fr !important; }
+    }
+    @media (max-width: 560px) {
+      html { font-size: 16px; }
+      .readiness-grid { grid-template-columns: 1fr !important; }
+    }
+  </style>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/styles.css?v=21" />
+  <link rel="stylesheet" href="/static/styles.css?v=77" />
 </head>
 <body class="holmes-body agent-readiness" id="home-app">
   <div class="readiness-bg" aria-hidden="true"></div>
 
   <header class="readiness-header">
-    <a href="/" class="readiness-logo">
-      <img src="/static/assets/enlight-lab-mark.png" alt="" width="36" height="32" />
-      <span>Enlight Lab</span>
+    <a href="/" class="readiness-logo" aria-label="Enlight Lab home">
+      <img src="/static/assets/enlight-lab-logo.png" alt="Enlight Lab" class="readiness-logo-lockup" />
+      <span class="readiness-logo-sub">CLUSTER SELF-HEAL AGENT</span>
     </a>
     <nav class="readiness-nav">
       <a href="/chat" class="readiness-nav-link readiness-nav-link--primary">Agent chat</a>
@@ -27,39 +100,39 @@
 
   <main class="readiness-page">
     <section class="readiness-hero">
-      <p class="readiness-eyebrow">Live cluster · Natural language · Client-ready demo</p>
+      <p class="readiness-eyebrow">40+ failure modes · Chaos Mesh · Plain English control</p>
       <h1 class="readiness-title">What happens when a bad deploy takes your apps down?</h1>
       <p class="readiness-lead">
-        Talk to your Kubernetes agent to <strong>deploy workloads</strong>, <strong>check health on demand</strong>,
-        <strong>simulate real failures</strong>, and <strong>auto-fix</strong> — the same flow you'd run across a full fleet,
-        shown here with two sample applications.
+        Talk to your Kubernetes agent to <strong>deploy workloads</strong>, <strong>inject accurate failures</strong>,
+        <strong>diagnose in plain English</strong>, and <strong>auto-fix</strong> — with Chaos Lab scenarios,
+        live operation timelines, and a one-click client demo.
       </p>
 
       <div class="readiness-cta-row">
         <a href="/chat" class="readiness-btn readiness-btn--primary">
           Start chatting with the agent →
         </a>
-        <a href="/chat?prompt=What%20can%20you%20do%3F" class="readiness-btn readiness-btn--ghost">
-          What can you do?
+        <a href="/chat?demo=client" class="readiness-btn readiness-btn--ghost">
+          Run client demo ▶
         </a>
       </div>
 
       <div class="readiness-stats" aria-label="Platform highlights">
         <div class="readiness-stat">
-          <strong>2</strong>
-          <span>Demo apps</span>
+          <strong>40+</strong>
+          <span>Failure modes</span>
         </div>
         <div class="readiness-stat">
-          <strong>4</strong>
-          <span>Core actions</span>
+          <strong>8</strong>
+          <span>Demo scenarios</span>
         </div>
         <div class="readiness-stat">
-          <strong>AI</strong>
-          <span>Diagnosis &amp; fix</span>
+          <strong>Chaos</strong>
+          <span>Mesh ready</span>
         </div>
         <div class="readiness-stat">
           <strong>Live</strong>
-          <span>Real workloads</span>
+          <span>Real cluster</span>
         </div>
       </div>
     </section>
@@ -152,7 +225,7 @@
 
     <footer class="readiness-footer">
       <p>Prefer click-by-click steps? <a href="/demo">Try the guided demo</a> · <a href="/chat">Open agent chat</a></p>
-      <span class="agent-ui-tag">UI v21</span>
+      <span class="agent-ui-tag">UI v48</span>
     </footer>
   </main>
 </body>

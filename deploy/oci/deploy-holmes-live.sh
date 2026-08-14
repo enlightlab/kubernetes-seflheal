@@ -18,7 +18,10 @@ need() {
   fi
 }
 
+need web/demo_scenarios.py
+need web/chaos_mesh.py
 need web/actions.py
+need web/failure_modes.py
 need web/config.py
 need web/server.py
 need web/static/demo.html
@@ -26,36 +29,47 @@ need web/static/demo.js
 need web/static/home.html
 need web/static/chat.html
 need web/static/holmes.js
+need web/static/ccd.css
 need web/static/styles.css
 need web/static/assets/enlight-lab-mark.png
+need web/static/assets/enlight-lab-mark.svg
 
-if ! grep -q 'holmes-card' web/static/chat.html; then
+if ! grep -qE 'el-page|ccd-root' web/static/chat.html; then
   echo "ERROR: web/static/chat.html is old — re-pack from Windows."
   exit 1
 fi
-if grep -q 'enlight-lab-logo.png' web/static/home.html || grep -q 'enlight-lab-logo.png' web/static/chat.html; then
-  echo "ERROR: UI still references enlight-lab-logo.png — need enlight-lab-mark.png from company assets."
+if ! grep -qE 'enlight-lab-logo\.png' web/static/chat.html; then
+  echo "ERROR: chat.html missing company logo enlight-lab-logo.png."
   exit 1
 fi
-if ! grep -q 'enlight-lab-mark.png' web/static/home.html; then
-  echo "ERROR: home.html missing company logo enlight-lab-mark.png reference."
+if ! grep -qE 'enlight-lab-logo\.png' web/static/home.html; then
+  echo "ERROR: home.html missing company logo enlight-lab-logo.png."
   exit 1
 fi
-if ! grep -q 'holmes-typing--visible' web/static/holmes.js; then
-  echo "ERROR: holmes.js is old (missing thinking-indicator fix) — re-pack from Windows."
+if ! grep -qE 'el-typing-dots|ccd-loading-dots' web/static/holmes.js; then
+  echo "ERROR: holmes.js is old (missing loading indicator) — re-pack from Windows."
   exit 1
 fi
-if ! grep -q 'agent-v25' web/static/chat.html; then
-  echo "ERROR: chat.html is not agent-v25 — re-pack from Windows and re-upload holmes-deploy.tar.gz"
+if ! grep -q 'gemini_agent_chat' web/agent_tools.py; then
+  echo "ERROR: agent_tools.py missing Engineer mode — re-pack from Windows."
   exit 1
 fi
-if ! grep -q 'ccd-page' web/static/chat.html; then
-  echo "ERROR: chat.html missing MVP operator UI — re-pack from Windows."
+if ! grep -q 'FAILURE_MODES' web/failure_modes.py; then
+  echo "ERROR: failure_modes.py missing failure catalog — re-pack from Windows."
   exit 1
 fi
-echo "Packaged chat UI: $(grep -o 'agent-v[0-9]*' web/static/chat.html | head -1) (expect agent-v25 + ccd-page)"
-if ! grep -q 'ccd-main' web/static/chat.html; then
-  echo "ERROR: chat.html missing MVP layout — re-pack from Windows."
+UI_VER="$(grep -o 'agent-v[0-9]*' web/static/chat.html | head -1)"
+if [ -z "$UI_VER" ]; then
+  echo "ERROR: chat.html missing ui-build tag — re-pack from Windows and re-upload holmes-deploy.tar.gz"
+  exit 1
+fi
+if ! grep -qE 'el-page|ccd-root' web/static/chat.html; then
+  echo "ERROR: chat.html missing operator UI shell — re-pack from Windows."
+  exit 1
+fi
+echo "Packaged chat UI: $UI_VER (expect agent-v77 + el-page)"
+if ! grep -qE 'el-hero-state|ccd-hero|ccd-main' web/static/chat.html; then
+  echo "ERROR: chat.html missing hero/chat layout — re-pack from Windows."
   exit 1
 fi
 if grep -q 'id="holmes-sidebar"' web/static/home.html || grep -q 'id="holmes-sidebar"' web/static/chat.html; then
@@ -96,6 +110,10 @@ echo "=== 1. ConfigMap overlay (Holmes UI + actions.py) ==="
 kubectl -n "$NS" delete configmap selfheal-holmes-overlay --ignore-not-found
 kubectl -n "$NS" create configmap selfheal-holmes-overlay \
   --from-file=actions.py=web/actions.py \
+  --from-file=agent_tools.py=web/agent_tools.py \
+  --from-file=failure_modes.py=web/failure_modes.py \
+  --from-file=demo_scenarios.py=web/demo_scenarios.py \
+  --from-file=chaos_mesh.py=web/chaos_mesh.py \
   --from-file=config.py=web/config.py \
   --from-file=server.py=web/server.py \
   --from-file=demo.html=web/static/demo.html \
@@ -103,8 +121,12 @@ kubectl -n "$NS" create configmap selfheal-holmes-overlay \
   --from-file=home.html=web/static/home.html \
   --from-file=chat.html=web/static/chat.html \
   --from-file=holmes.js=web/static/holmes.js \
+  --from-file=ccd.css=web/static/ccd.css \
   --from-file=styles.css=web/static/styles.css \
   --from-file=enlight-lab-mark.png=web/static/assets/enlight-lab-mark.png \
+  --from-file=enlight-lab-mark.svg=web/static/assets/enlight-lab-mark.svg \
+  --from-file=enlight-lab-logo.png=web/static/assets/enlight-lab-logo.png \
+  --from-file=enlight-lab-lockup.png=web/static/assets/enlight-lab-lockup.png \
   --from-file=nginx-staging-app.yaml=deploy/k8s/argocd/nginx-staging-app.yaml
 
 echo "=== 1b. Nginx workload manifests (for in-chat deploy without image rebuild) ==="
@@ -120,6 +142,8 @@ kubectl -n "$NS" patch configmap selfheal-ui-config --type merge -p '{
     "HOLMES_MODEL": "gemini/gemini-2.5-flash",
     "HOLMES_CHAT_DIRECT": "true",
     "CHAT_ACTIONS_ENABLED": "true",
+    "CHAT_LLM_TARGET": "true",
+    "CHAT_MODE": "hybrid",
     "PUBLIC_UI_BASE_URL": "https://selfheal.enlightlab.com",
     "PUBLIC_ARGOCD_HOST": "https://argocd.enlightlab.com",
     "PUBLIC_NGINX_DASHBOARD_URL": "https://selfheal.enlightlab.com/nginx/",
@@ -140,6 +164,10 @@ else
     {"op":"add","path":"/spec/template/spec/volumes","value":[{"name":"holmes-overlay","configMap":{"name":"selfheal-holmes-overlay"}}]},
     {"op":"add","path":"/spec/template/spec/containers/0/volumeMounts","value":[
       {"name":"holmes-overlay","mountPath":"/app/web/actions.py","subPath":"actions.py"},
+      {"name":"holmes-overlay","mountPath":"/app/web/agent_tools.py","subPath":"agent_tools.py"},
+      {"name":"holmes-overlay","mountPath":"/app/web/failure_modes.py","subPath":"failure_modes.py"},
+      {"name":"holmes-overlay","mountPath":"/app/web/demo_scenarios.py","subPath":"demo_scenarios.py"},
+      {"name":"holmes-overlay","mountPath":"/app/web/chaos_mesh.py","subPath":"chaos_mesh.py"},
       {"name":"holmes-overlay","mountPath":"/app/web/config.py","subPath":"config.py"},
       {"name":"holmes-overlay","mountPath":"/app/web/server.py","subPath":"server.py"},
       {"name":"holmes-overlay","mountPath":"/app/web/static/demo.html","subPath":"demo.html"},
@@ -147,8 +175,11 @@ else
       {"name":"holmes-overlay","mountPath":"/app/web/static/home.html","subPath":"home.html"},
       {"name":"holmes-overlay","mountPath":"/app/web/static/chat.html","subPath":"chat.html"},
       {"name":"holmes-overlay","mountPath":"/app/web/static/holmes.js","subPath":"holmes.js"},
+      {"name":"holmes-overlay","mountPath":"/app/web/static/ccd.css","subPath":"ccd.css"},
       {"name":"holmes-overlay","mountPath":"/app/web/static/styles.css","subPath":"styles.css"},
       {"name":"holmes-overlay","mountPath":"/app/web/static/assets/enlight-lab-mark.png","subPath":"enlight-lab-mark.png"},
+      {"name":"holmes-overlay","mountPath":"/app/web/static/assets/enlight-lab-mark.svg","subPath":"enlight-lab-mark.svg"},
+      {"name":"holmes-overlay","mountPath":"/app/web/static/assets/enlight-lab-logo.png","subPath":"enlight-lab-logo.png"},
       {"name":"holmes-overlay","mountPath":"/app/deploy/k8s/argocd/nginx-staging-app.yaml","subPath":"nginx-staging-app.yaml"},
       {"name":"nginx-k8s","mountPath":"/app/deploy/k8s/staging-nginx"}
     ]},
@@ -156,12 +187,24 @@ else
   ]'
 fi
 
-echo "=== 3b. Ensure company logo mount (existing deployments) ==="
+echo "=== 3b. Ensure company logo mounts (existing deployments) ==="
 if ! kubectl -n "$NS" get deployment selfheal-ui -o json | grep -q 'enlight-lab-mark.png'; then
   kubectl -n "$NS" patch deployment selfheal-ui --type=json -p='[
     {"op":"add","path":"/spec/template/spec/containers/0/volumeMounts/-","value":
       {"name":"holmes-overlay","mountPath":"/app/web/static/assets/enlight-lab-mark.png","subPath":"enlight-lab-mark.png"}}
-  ]' || echo "WARN: could not add logo mount — check deployment volumeMounts manually"
+  ]' || echo "WARN: could not add mark logo mount — check deployment volumeMounts manually"
+fi
+if ! kubectl -n "$NS" get deployment selfheal-ui -o json | grep -q 'enlight-lab-mark.svg'; then
+  kubectl -n "$NS" patch deployment selfheal-ui --type=json -p='[
+    {"op":"add","path":"/spec/template/spec/containers/0/volumeMounts/-","value":
+      {"name":"holmes-overlay","mountPath":"/app/web/static/assets/enlight-lab-mark.svg","subPath":"enlight-lab-mark.svg"}}
+  ]' || echo "WARN: could not add SVG logo mount — check deployment volumeMounts manually"
+fi
+if ! kubectl -n "$NS" get deployment selfheal-ui -o json | grep -q 'enlight-lab-logo.png'; then
+  kubectl -n "$NS" patch deployment selfheal-ui --type=json -p='[
+    {"op":"add","path":"/spec/template/spec/containers/0/volumeMounts/-","value":
+      {"name":"holmes-overlay","mountPath":"/app/web/static/assets/enlight-lab-logo.png","subPath":"enlight-lab-logo.png"}}
+  ]' || echo "WARN: could not add logo lockup mount — check deployment volumeMounts manually"
 fi
 
 echo "=== 3c. Ensure home + chat page mounts (v18) ==="
@@ -183,6 +226,40 @@ if ! kubectl -n "$NS" get deployment selfheal-ui -o json | grep -q 'nginx-stagin
     {"op":"add","path":"/spec/template/spec/containers/0/volumeMounts/-","value":
       {"name":"nginx-k8s","mountPath":"/app/deploy/k8s/staging-nginx"}}
   ]' || echo "WARN: could not add nginx manifest mounts — embedded YAML fallback still works"
+fi
+
+echo "=== 3h. Ensure failure_modes.py mount (v29 catalog) ==="
+if ! kubectl -n "$NS" get deployment selfheal-ui -o json | grep -q '/app/web/failure_modes.py'; then
+  kubectl -n "$NS" patch deployment selfheal-ui --type=json -p='[
+    {"op":"add","path":"/spec/template/spec/containers/0/volumeMounts/-","value":
+      {"name":"holmes-overlay","mountPath":"/app/web/failure_modes.py","subPath":"failure_modes.py"}}
+  ]' || echo "WARN: could not add failure_modes.py mount"
+fi
+
+echo "=== 3g. Ensure agent_tools.py mount (v27 Engineer mode) ==="
+if ! kubectl -n "$NS" get deployment selfheal-ui -o json | grep -q '/app/web/agent_tools.py'; then
+  kubectl -n "$NS" patch deployment selfheal-ui --type=json -p='[
+    {"op":"add","path":"/spec/template/spec/containers/0/volumeMounts/-","value":
+      {"name":"holmes-overlay","mountPath":"/app/web/agent_tools.py","subPath":"agent_tools.py"}}
+  ]' || echo "WARN: could not add agent_tools.py mount — check deployment volumeMounts manually"
+fi
+
+echo "=== 3i. Ensure demo_scenarios.py + chaos_mesh.py mounts (v41+) ==="
+for pyfile in demo_scenarios.py chaos_mesh.py; do
+  if ! kubectl -n "$NS" get deployment selfheal-ui -o json | grep -q "/app/web/${pyfile}"; then
+    kubectl -n "$NS" patch deployment selfheal-ui --type=json -p="[
+      {\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/volumeMounts/-\",\"value\":
+        {\"name\":\"holmes-overlay\",\"mountPath\":\"/app/web/${pyfile}\",\"subPath\":\"${pyfile}\"}}
+    ]" || echo "WARN: could not add ${pyfile} mount"
+  fi
+done
+
+echo "=== 3f. Ensure ccd.css mount (v26 MVP) ==="
+if ! kubectl -n "$NS" get deployment selfheal-ui -o json | grep -q '/app/web/static/ccd.css'; then
+  kubectl -n "$NS" patch deployment selfheal-ui --type=json -p='[
+    {"op":"add","path":"/spec/template/spec/containers/0/volumeMounts/-","value":
+      {"name":"holmes-overlay","mountPath":"/app/web/static/ccd.css","subPath":"ccd.css"}}
+  ]' || echo "WARN: could not add ccd.css mount — check deployment volumeMounts manually"
 fi
 
 echo "=== 3d. Remove stale holmes.html mount (old v17 overlay) ==="
@@ -275,14 +352,20 @@ if [ -z "${POD:-}" ]; then
   echo "ERROR: no running selfheal-ui pod found"
   exit 1
 fi
-kubectl -n "$NS" exec "$POD" -- grep -c agent-v25 /app/web/static/chat.html
-kubectl -n "$NS" exec "$POD" -- grep -c ccd-page /app/web/static/chat.html
+kubectl -n "$NS" exec "$POD" -- grep -o 'agent-v[0-9]*' /app/web/static/chat.html | head -1
+kubectl -n "$NS" exec "$POD" -- sh -c 'grep -cE "el-page|ccd-root" /app/web/static/chat.html'
+kubectl -n "$NS" exec "$POD" -- sh -c 'grep -c enlight-lab-logo.png /app/web/static/chat.html' && echo "logo lockup in chat.html: ok"
+kubectl -n "$NS" exec "$POD" -- test -f /app/web/static/ccd.css && echo "ccd.css mounted: ok"
+kubectl -n "$NS" exec "$POD" -- test -f /app/web/failure_modes.py && echo "failure_modes.py mounted: ok"
+kubectl -n "$NS" exec "$POD" -- test -f /app/web/demo_scenarios.py && echo "demo_scenarios.py mounted: ok"
+kubectl -n "$NS" exec "$POD" -- test -f /app/web/chaos_mesh.py && echo "chaos_mesh.py mounted: ok"
+kubectl -n "$NS" exec "$POD" -- test -f /app/web/agent_tools.py && echo "agent_tools.py mounted: ok"
 kubectl -n "$NS" exec "$POD" -- sh -c '! grep -q holmes-sidebar /app/web/static/home.html' && echo "no legacy sidebar: ok"
 
 echo ""
 echo "Done. Home: https://selfheal.enlightlab.com/  Chat: https://selfheal.enlightlab.com/chat"
 echo "Verify: curl -s https://selfheal.enlightlab.com/api/ui-version | jq ."
-echo "       (expect ui_build: agent-v25, chat_mvp: true)"
+echo "       (expect ui_build: agent-v77, chat_mvp: true, chat_agent_tools: true)"
 echo ""
 if [ -f deploy/oci/apply-nginx-staging.sh ]; then
   echo "Nginx GitOps (second app): bash deploy/oci/apply-nginx-staging.sh"

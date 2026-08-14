@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "enlight-selfheal": {
+      "command": "python",
+      "args": ["D:/devops-selfheal/scripts/selfheal_mcp.py"],
+      "env": {
+        "SELFHEAL_URL": "https://selfheal.enlightlab.com"
+      }
+    }
+  }
+}

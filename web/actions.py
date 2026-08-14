@@ -15,6 +15,28 @@ from collections.abc import Callable
 from pathlib import Path
 
 import config as cfg
+from failure_modes import (
+    FAILURE_MODES,
+    MODE_EXPECTED_SIGNALS,
+    SERVICE_LEVEL_MODE_IDS,
+    classify_failure_mode,
+    classify_failure_modes,
+    clear_all_failure_injections,
+    describe_expected_failure,
+    describe_expected_failure_plain,
+    expected_signals_for_modes,
+    inject_mode_chips,
+    format_active_failure_headline,
+    failure_mode_label,
+    failure_mode_layman_explain,
+    failure_modes_by_category,
+    chaos_mesh_info,
+    inject_failure_mode,
+    inject_failure_modes,
+    list_demo_scenarios,
+    list_failure_modes,
+    scenario_by_id,
+)
 
 log = logging.getLogger(__name__)
 
@@ -332,6 +354,315 @@ def _pod_troubleshoot() -> str:
     return hint
 
 
+def _collect_container_issues(container_statuses: list) -> list[dict[str, str]]:
+    """All distinct container waiting/terminated reasons (combo inject shows each)."""
+    issues: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for cs in container_statuses or []:
+        cname = cs.get("name", "container")
+        for state_key in ("waiting", "terminated"):
+            st = (cs.get("state") or {}).get(state_key) or {}
+            reason = (st.get("reason") or "").strip()
+            if not reason:
+                continue
+            key = (cname, reason)
+            if key in seen:
+                continue
+            seen.add(key)
+            issues.append({
+                "container": cname,
+                "reason": reason,
+                "message": (st.get("message") or "")[:200],
+            })
+    return issues
+
+
+def _parse_pod_json_items(items: list) -> list[dict]:
+    pods: list[dict] = []
+    for item in items:
+        meta = item.get("metadata", {})
+        status = item.get("status", {})
+        name = meta.get("name", "")
+        phase = status.get("phase", "Unknown")
+        container_statuses = status.get("containerStatuses") or []
+        ready_count = sum(1 for cs in container_statuses if cs.get("ready"))
+        total = len(container_statuses)
+        ready_str = f"{ready_count}/{total}" if total else "?/?"
+        container_errors = _collect_container_issues(container_statuses)
+        if container_errors:
+            display = " + ".join(
+                f"{e['reason']} ({e['container']})" for e in container_errors
+            )
+            reason = container_errors[0]["reason"]
+            message = container_errors[0].get("message", "")
+        else:
+            reason = ""
+            message = ""
+            display = phase
+        pods.append({
+            "name": name,
+            "phase": phase,
+            "ready": ready_str,
+            "status": display,
+            "reason": reason,
+            "message": message,
+            "container_errors": container_errors,
+            "line": f"{name} · {ready_str} · {display}",
+        })
+    pods.sort(key=_pod_severity)
+    return pods
+
+
+def _pod_detail_for_label(pod_label: str) -> dict:
+    pods = _fetch_pods_for_label(pod_label)
+    active = [p for p in pods if p["phase"] != "Terminating"]
+    pick = (active or pods)[:1]
+    if not pick:
+        return {"line": "no pods", "container_errors": []}
+    return {
+        "line": pick[0]["line"],
+        "container_errors": pick[0].get("container_errors") or [],
+        "pod_name": pick[0]["name"],
+    }
+
+
+def _pod_line_with_injection(app: dict, base_line: str) -> str:
+    """Append active chaos mode names when service-level failures hide in pod phase."""
+    modes = _app_injected_modes(app)
+    if not modes:
+        return base_line
+    from failure_modes import failure_mode_label
+    labels = [failure_mode_label(m) for m in modes[:4]]
+    return f"{base_line} · Injected: {' + '.join(labels)}"
+
+
+def _pod_ready_not_full(line: str) -> bool:
+    """True when ready count < total (e.g. 0/1, 1/2) — matches Argo CD Degraded."""
+    import re
+    m = re.search(r"(\d+)/(\d+)", line or "")
+    if not m:
+        return False
+    ready, total = int(m.group(1)), int(m.group(2))
+    return total > 0 and ready < total
+
+
+def _pod_display_line(pod_label: str) -> str:
+    """Readable pod line — all container errors when combo inject (crash + OOM sidecar)."""
+    return _pod_detail_for_label(pod_label)["line"]
+
+
+def _fetch_pods_for_label(pod_label: str) -> list[dict]:
+    code, out = _kubectl(
+        "get", "pods", "-n", cfg.NAMESPACE, "-l", pod_label, "-o", "json",
+    )
+    if code != 0 or not out.strip():
+        return []
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError:
+        return []
+    return _parse_pod_json_items(data.get("items", []))
+
+
+def _pod_rows_for_label(pod_label: str) -> list[dict[str, str]]:
+    """Parse kubectl pod lines into structured rows (skips wide-output noise)."""
+    code, out = _kubectl(
+        "get", "pods", "-n", cfg.NAMESPACE, "-l", pod_label, "--no-headers",
+    )
+    rows: list[dict[str, str]] = []
+    if code != 0 or not out.strip():
+        return rows
+    for line in out.strip().splitlines():
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        rows.append({"name": parts[0], "ready": parts[1], "phase": parts[2]})
+    return rows
+
+
+def _app_heal_phase(app: dict) -> str:
+    """ok | recovering | unhealthy"""
+    if _app_has_active_injection(app):
+        return "unhealthy"
+    if _app_is_healthy(app):
+        return "ok"
+    rows = _pod_rows_for_label(app["pod_label"])
+    active = [r for r in rows if r["phase"] != "Terminating"]
+    if not active:
+        return "unhealthy"
+    phase = active[0]["phase"]
+    if phase in ("ContainerCreating", "PodInitializing", "Pending"):
+        return "recovering"
+    if active[0]["ready"] == "1/1" and phase == "Running":
+        return "ok"
+    return "unhealthy"
+
+
+def _wait_post_heal_health(app_ids: list[str], *, timeout: int = 90) -> None:
+    """After heal, poll until apps are healthy or timeout (avoids stale UNHEALTHY cards)."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if all(_app_is_healthy(cfg.demo_app(aid)) for aid in app_ids):
+            return
+        time.sleep(3)
+
+
+def _format_heal_app_summary(app_id: str, result: dict | None = None) -> dict:
+    """Structured per-app heal outcome for chat UI."""
+    app = cfg.demo_app(app_id)
+    result = result or {}
+    injected = _app_has_active_injection(app)
+    phase = _app_heal_phase(app)
+    gitops = _argocd_status_for_app(app)
+    healthy = (
+        not injected
+        and (bool(result.get("healthy") or result.get("app_reachable")) or phase == "ok")
+    )
+    if healthy and gitops and not _argocd_is_synced_healthy(gitops):
+        status, status_key = "Recovering", "warn"
+        detail = f"Pod is healthy; GitOps catching up ({gitops})."
+    elif healthy:
+        status, status_key = "Recovered", "ok"
+        detail = "Health check passing."
+    elif injected:
+        status, status_key = "Outage active", "bad"
+        detail = "Failure injection still active — run auto-fix again."
+    elif phase == "recovering":
+        status, status_key = "Recovering", "warn"
+        detail = "Pod is still starting — usually green within 30 seconds."
+    else:
+        status, status_key = "Needs attention", "bad"
+        raw_err = str(result.get("heal_error") or result.get("error") or "").strip()
+        if raw_err:
+            detail = raw_err[:140]
+        else:
+            detail = "Pod not ready yet — refresh status or run auto-fix again."
+    return {
+        "id": app_id,
+        "label": app["label"],
+        "status": status,
+        "status_key": status_key,
+        "pod_line": _pod_display_line(app["pod_label"]),
+        "gitops": gitops,
+        "detail": detail,
+        "healthy": healthy and status_key == "ok",
+        "links": _app_browser_links(app_id),
+    }
+
+
+def _already_deployed_reply(app_id: str) -> tuple[str, list[dict[str, str]]]:
+    """Message + choice chips when user deploys an app that already exists."""
+    app = cfg.demo_app(app_id)
+    if _app_is_healthy(app):
+        msg = (
+            f"**{app['label']} is already deployed** and healthy in `{cfg.NAMESPACE}`.\n\n"
+            "No changes were made. You can **reset** (tear down / undeploy) or simulate a failure."
+        )
+    else:
+        msg = (
+            f"**{app['label']} is already deployed** in `{cfg.NAMESPACE}` but not fully healthy yet.\n\n"
+            "You can wait for pods, run **auto-fix**, or **reset** to tear down."
+        )
+    choices = [
+        {"label": f"Reset {app['label']}", "prompt": f"reset {app_id}"},
+        {"label": f"Auto-fix {app['label']}", "prompt": f"auto-fix {app_id}"},
+        {"label": "Pod status", "prompt": f"show pod status for {app_id}"},
+    ]
+    return msg, choices
+
+
+def _both_already_deployed_reply() -> tuple[str, list[dict[str, str]]]:
+    rows = _apps_status_data()
+    healthy = sum(1 for r in rows if r["healthy"])
+    total = len(rows)
+    msg = (
+        f"**Both demo apps are already deployed** in `{cfg.NAMESPACE}` "
+        f"({healthy}/{total} healthy).\n\n"
+        "No changes were made. You can **reset** either app or both, or simulate a failure."
+    )
+    choices = [
+        {"label": "Reset FastAPI", "prompt": "reset fastapi"},
+        {"label": "Reset Nginx", "prompt": "reset nginx"},
+        {"label": "Reset both apps", "prompt": "reset both apps"},
+        {"label": "Show cluster status", "prompt": "show cluster status"},
+    ]
+    return msg, choices
+
+
+def _format_heal_all_message(summaries: list[dict]) -> str:
+    """Short markdown summary — details render in heal_summary cards."""
+    ok = sum(1 for s in summaries if s.get("status_key") == "ok")
+    warn = sum(1 for s in summaries if s.get("status_key") == "warn")
+    total = len(summaries)
+    if ok == total:
+        headline = f"**Auto-fix complete** — {_demo_health_phrase(ok, total).strip('**')}."
+    elif warn:
+        headline = (
+            f"**Auto-fix complete** — {ok}/{total} healthy, "
+            f"{warn} still starting (Argo CD may already show green)."
+        )
+    else:
+        headline = f"**Auto-fix applied** — {ok}/{total} apps fully recovered."
+    bullets = []
+    icons = {"ok": "✓", "warn": "◷", "bad": "✗"}
+    for s in summaries:
+        icon = icons.get(s.get("status_key"), "·")
+        bullets.append(
+            f"- {icon} **{s['label']}** — {s['status']} · `{s['pod_line']}`"
+            + (f" · GitOps `{s['gitops']}`" if s.get("gitops") else "")
+        )
+    return headline + "\n\n" + "\n".join(bullets)
+
+
+def _app_needs_heal(app_id: str) -> bool:
+    app = cfg.demo_app(app_id)
+    if not _app_workloads_exist(app):
+        return False
+    return not _app_is_healthy(app) or _app_has_active_injection(app)
+
+
+def _already_healthy_reply(target: str) -> dict | None:
+    """Return a chat payload when heal/auto-fix is unnecessary."""
+    if target == "all":
+        rows = [r for r in _apps_status_data() if r.get("deployed")]
+        if not rows:
+            return None
+        if any(_app_needs_heal(r["id"]) for r in rows):
+            return None
+        lines = [
+            f"{_demo_health_phrase(len(rows), len(rows), already=True)}.\n",
+            "No auto-fix needed — pods are Running and there is no active chaos injection.\n",
+        ]
+        for r in rows:
+            lines.append(f"- **{r['label']}** — {r['state']} · `{r['pod_line']}`")
+        lines.append("\nSay **pod status** anytime, or **simulate outage** to run a demo failure.")
+        return {
+            "message": "\n".join(lines),
+            "apps_status": rows,
+            "heal_summary": [
+                _format_heal_app_summary(r["id"], {"healthy": True, "app_reachable": True})
+                for r in rows
+            ],
+        }
+    if not _app_workloads_exist(cfg.demo_app(target)):
+        return None
+    if _app_needs_heal(target):
+        return None
+    app = cfg.demo_app(target)
+    row = next((r for r in _apps_status_data() if r["id"] == target), None)
+    msg = (
+        f"**{app['label']} is already healthy.**\n\n"
+        f"- Pod: `{row['pod_line'] if row else _pod_display_line(app['pod_label'])}`\n"
+        f"- GitOps: `{row['gitops'] if row else 'n/a'}`\n\n"
+        "No auto-fix needed. Say **simulate outage** to inject a demo failure."
+    )
+    return {
+        "message": msg,
+        "apps_status": [row] if row else [],
+        "heal_summary": [_format_heal_app_summary(target, {"healthy": True, "app_reachable": True})],
+    }
+
+
 def _argocd_trigger_sync_named(app_name: str) -> tuple[int, str]:
     patch = _patch_file(
         f"argocd-sync-op-{app_name}.json",
@@ -351,11 +682,17 @@ def _argocd_sync_status_named(app_name: str) -> str:
     return _kubectl_value(code, out, "Unknown/Unknown")
 
 
+def _argocd_is_synced_healthy(status: str) -> bool:
+    """True only when Argo CD reports Synced and Healthy (not OutOfSync/Healthy)."""
+    parts = (status or "").split("/", 1)
+    return len(parts) == 2 and parts[0] == "Synced" and parts[1] == "Healthy"
+
+
 def _argocd_wait_synced_named(app_name: str, timeout: int = 90) -> str:
     deadline = time.time() + timeout
     last = _argocd_sync_status_named(app_name)
     while time.time() < deadline:
-        if last.startswith("Synced/"):
+        if _argocd_is_synced_healthy(last):
             return last
         time.sleep(3)
         _argocd_refresh_named(app_name)
@@ -516,12 +853,20 @@ def _staging_is_clean() -> bool:
 
 def _argocd_restore_gitops_policy() -> tuple[int, str]:
     """Re-apply Application spec so auto-sync + ignoreDifferences survive the demo."""
-    manifest = cfg.ARGOCD_APP_MANIFEST
-    if manifest.is_file():
+    return _argocd_restore_for_app(cfg.demo_app("fastapi"))
+
+
+def _argocd_restore_for_app(app: dict) -> tuple[int, str]:
+    """Re-apply Argo CD Application spec for a demo workload."""
+    manifest = app.get("argocd_manifest")
+    if manifest and Path(manifest).is_file():
         return _kubectl("apply", "-f", str(manifest))
-    if cfg.FASTAPI_ARGOCD_APP_YAML:
+    if app.get("id") == "fastapi" and cfg.FASTAPI_ARGOCD_APP_YAML:
         return _kubectl_apply_yaml(cfg.FASTAPI_ARGOCD_APP_YAML)
-    return _argocd_set_automated(True)
+    argo_app = app.get("argocd_app") or ""
+    if argo_app:
+        return _argocd_set_automated_named(argo_app, True)
+    return 0, ""
 
 
 def _wait_app_ready(timeout: int = 60) -> None:
@@ -536,27 +881,67 @@ def _wait_app_ready(timeout: int = 60) -> None:
     )
 
 
+def _pod_ready_for_label(pod_label: str) -> bool:
+    code, out = _kubectl(
+        "get", "pods", "-n", cfg.NAMESPACE, "-l", pod_label, "--no-headers",
+    )
+    if code != 0 or not out.strip():
+        return False
+    for line in out.strip().splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[1] == "1/1" and parts[2] == "Running":
+            return True
+    return False
+
+
+def _pod_summary_for_label(pod_label: str) -> str:
+    code, pods = _kubectl(
+        "get", "pods", "-n", cfg.NAMESPACE, "-l", pod_label, "--no-headers",
+    )
+    return _kubectl_value(code, pods, "no pods")
+
+
+def _wait_pod_ready_with_steps(
+    timeline: list[dict[str, str]],
+    *,
+    pod_label: str | None = None,
+    timeout: int = 90,
+    title: str = "Waiting for healthy pod",
+) -> bool:
+    """Poll pod readiness — works when rollout status is stuck on a bad revision."""
+    label = pod_label or cfg.POD_LABEL
+    deadline = time.time() + timeout
+    last_detail = ""
+    tick = 0
+    while time.time() < deadline:
+        if _pod_ready_for_label(label):
+            _timeline_step(
+                timeline,
+                "Pod is ready",
+                _pod_summary_for_label(label),
+                phase="k8s",
+                pause=False,
+            )
+            return True
+        detail = _pod_summary_for_label(label)
+        if detail != last_detail or tick % 2 == 0:
+            _timeline_step(timeline, title, detail, phase="k8s", pause=False)
+            last_detail = detail
+        tick += 1
+        time.sleep(3)
+    return False
+
+
 def _wait_rollout_with_steps(
     timeline: list[dict[str, str]],
     *,
     timeout: int = 120,
     title: str = "Waiting for rollout to complete",
 ) -> None:
-    """Poll rollout status and stream progress (avoids silent 120s SSE gaps)."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        code, out = _kubectl(
-            "rollout", "status", f"deployment/{cfg.DEPLOYMENT_NAME}",
-            "-n", cfg.NAMESPACE, "--timeout=8s",
-        )
-        if code == 0:
-            return
-        detail = _staging_pod_summary()
-        if out.strip() and "cluster offline" not in out.lower():
-            detail = out.splitlines()[-1][:160]
-        _timeline_step(timeline, title, detail, phase="k8s", pause=False)
-        time.sleep(4)
-    raise RuntimeError(f"Rollout timed out after {timeout}s. {_pod_troubleshoot()}")
+    """Poll pod readiness (rollout status lies when a bad revision is still progressing)."""
+    if _wait_pod_ready_with_steps(timeline, timeout=timeout, title=title):
+        return
+    raise RuntimeError(f"Pod not ready after {timeout}s. {_pod_troubleshoot()}")
 
 
 def _cluster_offline(out: str) -> bool:
@@ -577,11 +962,30 @@ def _cluster_offline(out: str) -> bool:
     )
 
 
+def _cluster_api_ok() -> tuple[bool, str]:
+    """Namespace-scoped API access — enough for chat telemetry and read-only answers."""
+    ns = cfg.NAMESPACE
+    code, out = _kubectl(
+        "get", "deployment", "-n", ns,
+        "--request-timeout=10s", "--no-headers",
+    )
+    if code == 0:
+        return True, ""
+    code2, out2 = _kubectl("get", "ns", ns, "--request-timeout=10s")
+    if code2 == 0:
+        return True, ""
+    return _cluster_reachable()
+
+
 def _cluster_reachable() -> tuple[bool, str]:
     code, out = _kubectl("get", "nodes", "--request-timeout=10s", "--no-headers")
     if code == 0 and out.strip():
         return True, ""
-    if _cluster_offline(out):
+    ns = cfg.NAMESPACE
+    code_ns, out_ns = _kubectl("get", "deployment", "-n", ns, "--request-timeout=10s", "--no-headers")
+    if code_ns == 0:
+        return True, ""
+    if _cluster_offline(out) or _cluster_offline(out_ns):
         if cfg.DEPLOY_TARGET == "local":
             return False, (
                 "Kubernetes cluster is offline. Start Docker Desktop, then run "
@@ -900,12 +1304,41 @@ def _clear_crash_override() -> None:
 
 
 def _pause_argocd_autosync() -> None:
+    _pause_argocd_autosync_named(cfg.ARGOCD_APP)
+
+
+def _pause_gitops_for_injection(
+    app: dict,
+    timeline: list[dict[str, str]] | None = None,
+) -> None:
+    """Pause Argo CD auto-sync so kubectl injections are not immediately reverted."""
+    argo_app = app.get("argocd_app") or ""
+    if not app.get("gitops") or not argo_app:
+        return
+    if timeline is not None:
+        _timeline_step(
+            timeline,
+            "Pausing Argo CD auto-sync",
+            f"{argo_app} — GitOps won't heal before auto-fix",
+            phase="break",
+        )
+    _pause_argocd_autosync_named(argo_app)
+
+
+def _pause_gitops_for_demo_apps(app_ids: tuple[str, ...] = ("fastapi", "nginx")) -> None:
+    for aid in app_ids:
+        _pause_gitops_for_injection(cfg.demo_app(aid))
+
+
+def _pause_argocd_autosync_named(argo_app: str) -> None:
+    if not argo_app:
+        return
     patch = _patch_file(
         "argocd-no-heal.json",
         '{"spec":{"syncPolicy":{"automated":null}}}',
     )
     code, patch_out = _kubectl(
-        "patch", "application", cfg.ARGOCD_APP, "-n", cfg.ARGOCD_NAMESPACE,
+        "patch", "application", argo_app, "-n", cfg.ARGOCD_NAMESPACE,
         "--type", "merge", f"--patch-file={patch}",
     )
     if code != 0:
@@ -1192,6 +1625,19 @@ def simulate_outage(on_step: StepCallback = None) -> dict:
 
 
 def _simulate_outage_impl() -> dict:
+    return _simulate_guided_outage_impl("fastapi")
+
+
+def _simulate_guided_outage_impl(app_id: str) -> dict:
+    """Classic guided-demo outage (bad image / crash / scale-0) for FastAPI or Nginx."""
+    app = cfg.demo_app(app_id)
+    dep = app["deployment"]
+    container = app["container"]
+    pod_label = app["pod_label"]
+    bad_image = app.get("bad_image") or cfg.BAD_IMAGE
+    argo_app = app.get("argocd_app") or cfg.ARGOCD_APP
+    app_label = app["label"]
+
     ok, cluster_msg = _cluster_reachable()
     if not ok:
         raise RuntimeError(cluster_msg)
@@ -1199,51 +1645,58 @@ def _simulate_outage_impl() -> dict:
     timeline: list[dict[str, str]] = []
     _timeline_step(
         timeline,
-        "Preparing incident simulation",
+        f"Preparing incident simulation for {app_label}",
         "Safe for staging — production is not touched",
     )
-    _timeline_step(timeline, "Pausing ArgoCD auto-sync", "So GitOps won't heal before you run Explain + Auto-fix")
-    _pause_argocd_autosync()
+    if app.get("gitops") and argo_app:
+        _timeline_step(
+            timeline,
+            "Pausing Argo CD auto-sync",
+            f"{argo_app} — GitOps won't heal before Explain + Auto-fix",
+        )
+        _pause_gitops_for_injection(app)
+
     mode = cfg.OUTAGE_MODE
     mode_note = ""
 
     if mode == "instant":
-        _timeline_step(timeline, "Scaling deployment to zero replicas", "Fast outage — no pods remain")
+        _timeline_step(timeline, "Scaling deployment to zero replicas", f"{dep} — fast outage")
         _kubectl_must(
-            "scale", f"deployment/{cfg.DEPLOYMENT_NAME}",
+            "scale", f"deployment/{dep}",
             "-n", cfg.NAMESPACE, "--replicas=0",
-            action="Scale staging app to zero",
+            action=f"Scale {dep} to zero",
         )
-        mode_note = "Scaled to 0 replicas — app down in seconds."
+        mode_note = f"{app_label} scaled to 0 replicas — app down in seconds."
     elif mode == "crash":
-        _timeline_step(timeline, "Injecting crash-loop command into container", "Pod will exit immediately on start")
-        _clear_crash_override()
+        _timeline_step(timeline, "Injecting crash-loop command into container", f"{dep} exits on start")
+        if app_id == "fastapi":
+            _clear_crash_override()
         patch = _patch_file(
-            "deploy-crash.json",
+            f"guided-crash-{dep}.json",
             '[{"op":"add","path":"/spec/template/spec/containers/0/command",'
             '"value":["/bin/sh","-c","exit 1"]},'
             '{"op":"replace","path":"/spec/template/spec/containers/0/args","value":[]}]',
         )
         code, patch_out = _kubectl(
-            "patch", "deployment", cfg.DEPLOYMENT_NAME, "-n", cfg.NAMESPACE,
+            "patch", "deployment", dep, "-n", cfg.NAMESPACE,
             "--type", "json", f"--patch-file={patch}",
         )
         if code != 0:
             raise RuntimeError(_kubectl_value(code, patch_out, "Failed to inject crash command"))
-        _kubectl("delete", "pods", "-n", cfg.NAMESPACE, "-l", cfg.POD_LABEL, "--wait=false")
-        _timeline_step(timeline, "Waiting for CrashLoopBackOff", "ArgoCD should show Degraded")
-        mode_note = "Crash loop injected — pod shows CrashLoopBackOff in ~15s."
+        _kubectl("delete", "pods", "-n", cfg.NAMESPACE, "-l", pod_label, "--wait=false")
+        _timeline_step(timeline, "Waiting for CrashLoopBackOff", "Argo CD should show Degraded")
+        mode_note = f"Crash loop on {app_label} — pod shows CrashLoopBackOff in ~15s."
     else:
         mode = "image"
         _timeline_step(
             timeline,
-            "Patching deployment with invalid container image",
-            cfg.BAD_IMAGE,
+            f"Patching {app_label} with invalid container image",
+            bad_image,
         )
         code, set_out = _kubectl(
             "set", "image",
-            f"deployment/{cfg.DEPLOYMENT_NAME}",
-            f"{cfg.CONTAINER_NAME}={cfg.BAD_IMAGE}",
+            f"deployment/{dep}",
+            f"{container}={bad_image}",
             "-n", cfg.NAMESPACE,
         )
         if code != 0:
@@ -1256,56 +1709,68 @@ def _simulate_outage_impl() -> dict:
         _timeline_step(
             timeline,
             "Waiting for failure signals",
-            "ArgoCD Progressing → Degraded in ~1–2 minutes",
+            "Argo CD Progressing → Degraded in ~1–2 minutes",
         )
-        mode_note = "Bad image deployed — ErrImagePull / ImagePullBackOff expected."
+        mode_note = f"Bad image on {app_label} — ErrImagePull / ImagePullBackOff expected."
 
     deadline = time.time() + (6 if mode == "instant" else 18)
     while time.time() < deadline:
-        if mode == "instant" and _deployment_replicas() == 0:
-            break
-        if mode != "instant" and not _pod_running_ready():
+        if mode == "instant":
+            code, rep = _kubectl(
+                "get", "deployment", dep, "-n", cfg.NAMESPACE,
+                "-o", "jsonpath={.spec.replicas}",
+            )
+            if code == 0 and rep.strip() == "0":
+                break
+        elif not _app_is_healthy(app):
             break
         time.sleep(2)
 
     code, pods = _kubectl(
-        "get", "pods", "-n", cfg.NAMESPACE, "-l", cfg.POD_LABEL, "--no-headers",
+        "get", "pods", "-n", cfg.NAMESPACE, "-l", pod_label, "--no-headers",
     )
-    code2, argo = _kubectl(
-        "get", "application", cfg.ARGOCD_APP, "-n", cfg.ARGOCD_NAMESPACE,
-        "-o", "jsonpath={.status.sync.status}/{.status.health.status}",
-    )
-    links = resolved_public_links()
-    app_down = not _reachable(cfg.APP_HEALTH_CHECK_URL)
+    if argo_app:
+        code2, argo = _kubectl(
+            "get", "application", argo_app, "-n", cfg.ARGOCD_NAMESPACE,
+            "-o", "jsonpath={.status.sync.status}/{.status.health.status}",
+        )
+        argo_val = _kubectl_value(code2, argo, "unknown")
+    else:
+        argo_val = "n/a"
+
+    app_links = _app_browser_links(app_id)
+    links = resolved_public_app_links()
+    health_url = app_links.get("health") or app.get("health_url") or ""
+    app_down = not _probe_app_health(app_id, app, timeout=3) if health_url else not _app_is_healthy(app)
     _timeline_step(
         timeline,
-        "Outage active — application is down",
+        f"Outage active — {app_label} is down",
         _kubectl_value(code, pods, "no pods"),
         pause=False,
     )
     tips = [
-        "App health card should show Down.",
-        "Open Staging dashboard — metrics turn red.",
-        "Open ArgoCD (credentials on this page) to show OutOfSync / Degraded.",
+        f"{app_label} health should show Down.",
+        f"Open Argo CD for {argo_app or app_label} to show Degraded.",
     ]
-    if links.get("app_dashboard"):
-        tips.insert(1, f"Staging UI: {links['app_dashboard']}")
-    if links.get("app_health"):
-        tips.insert(2, f"Health API: {links['app_health']}")
+    if app_links.get("dashboard"):
+        tips.insert(1, f"App UI: {app_links['dashboard']}")
 
     return {
         "mode": mode,
+        "app": app_id,
         "timeline": timeline,
         "pods": _kubectl_value(code, pods, "no pods"),
-        "argocd": _kubectl_value(code2, argo, "unknown"),
+        "argocd": argo_val,
         "app_down": app_down,
         "tips": tips,
-        "open_url": links.get("argocd_app", cfg.PUBLIC_ARGOCD_APP_URL),
-        "staging_url": links.get("app_dashboard", cfg.PUBLIC_APP_DASHBOARD_URL),
-        "health_url": links.get("app_health", cfg.PUBLIC_APP_HEALTH_URL),
-        "message": "Outage simulated — staging app is down on purpose. " + mode_note,
+        "open_url": app_links.get("argocd_app") or links.get("argocd_app", cfg.PUBLIC_ARGOCD_APP_URL),
+        "staging_url": app_links.get("dashboard") or links.get("app_dashboard", cfg.PUBLIC_APP_DASHBOARD_URL),
+        "health_url": app_links.get("health") or links.get("app_health", cfg.PUBLIC_APP_HEALTH_URL),
+        "message": (
+            f"**Outage simulated on {app_label}** — app is down on purpose for the guided demo. "
+            + mode_note
+        ),
     }
-
 
 def _kubectl_events_findings(namespace: str, limit: int = 8, pod_name: str = "") -> list[str]:
     code, out = _kubectl(
@@ -1330,6 +1795,7 @@ def _normalize_query(message: str) -> str:
     for typo, fix in (
         ("outrgae", "outrage"),
         ("outarge", "outrage"),
+        ("outrage", "outage"),
         ("simulte", "simulate"),
         ("simualte", "simulate"),
         ("stimualte", "stimulate"),
@@ -1337,12 +1803,18 @@ def _normalize_query(message: str) -> str:
         ("autofiz", "autofix"),
         ("auto fiz", "autofix"),
         ("auto-fiz", "autofix"),
+        ("fic both", "fix both"),
+        ("fic my", "fix my"),
+        (" fic ", " fix "),
+        ("fic ", "fix "),
         ("ngnix", "nginx"),
         ("ngix", "nginx"),
         ("ninx", "nginx"),
         ("fastpi", "fastapi"),
         ("imagpull", "imagepull"),
         ("crashloop", "crash loop"),
+        ("crashloopbackoff", "crash loop"),
+        ("crashloopbackoof", "crash loop"),
         ("sattus", "status"),
         ("staus", "status"),
         ("statu ", "status "),
@@ -1364,88 +1836,11 @@ def _normalize_query(message: str) -> str:
 
 def _classify_error_mode(message: str) -> str:
     """Map natural language to a demo-safe failure injection mode."""
-    q = _normalize_query(message)
-    if re.search(r"\b(crash\s*loop|crashloop|keeps crashing|exit 1|container error)\b", q):
-        return "crash"
-    if re.search(r"\b(oom|out of memory|memory limit|oomkilled)\b", q):
-        return "oom"
-    if re.search(r"\b(scale.*0|zero replica|scaled to 0|no pods)\b", q):
-        return "instant"
-    if re.search(
-        r"\b(errimage|image\s*pull|pull back|bad image|invalid image|imagepull|imagpull)\b",
-        q,
-    ):
-        return "image"
-    if re.search(r"\b(pending|unschedulable|node affinity)\b", q):
-        return "pending"
-    return (cfg.OUTAGE_MODE or "image").lower()
+    return classify_failure_mode(_normalize_query(message))
 
 
-_ERROR_MODE_LABELS = {
-    "crash": "CrashLoopBackOff",
-    "oom": "OOMKilled (memory limit)",
-    "instant": "scaled-to-zero outage",
-    "image": "ErrImagePull / ImagePullBackOff",
-    "pending": "Pending / scheduling failure",
-}
-
-
-def _clear_app_crash_override(app: dict) -> None:
-    dep = app["deployment"]
-    patch = _patch_file(
-        f"clear-cmd-{dep}.json",
-        '[{"op":"remove","path":"/spec/template/spec/containers/0/command"},'
-        '{"op":"remove","path":"/spec/template/spec/containers/0/args"}]',
-    )
-    _kubectl(
-        "patch", "deployment", dep, "-n", cfg.NAMESPACE,
-        "--type", "json", f"--patch-file={patch}",
-    )
-
-
-def _inject_app_crash(app: dict) -> None:
-    dep = app["deployment"]
-    patch = _patch_file(
-        f"crash-{dep}.json",
-        '[{"op":"add","path":"/spec/template/spec/containers/0/command",'
-        '"value":["/bin/sh","-c","exit 1"]},'
-        '{"op":"replace","path":"/spec/template/spec/containers/0/args","value":[]}]',
-    )
-    code, out = _kubectl(
-        "patch", "deployment", dep, "-n", cfg.NAMESPACE,
-        "--type", "json", f"--patch-file={patch}",
-    )
-    if code != 0:
-        raise RuntimeError(_kubectl_value(code, out, f"Failed to inject crash on {dep}"))
-    _kubectl("delete", "pods", "-n", cfg.NAMESPACE, "-l", app["pod_label"], "--wait=false")
-
-
-def _inject_app_oom(app: dict) -> None:
-    dep = app["deployment"]
-    patch = _patch_file(
-        f"oom-{dep}.json",
-        '[{"op":"add","path":"/spec/template/spec/containers/0/resources",'
-        '"value":{"limits":{"memory":"1Mi"},"requests":{"memory":"1Mi"}}}]',
-    )
-    code, out = _kubectl(
-        "patch", "deployment", dep, "-n", cfg.NAMESPACE,
-        "--type", "json", f"--patch-file={patch}",
-    )
-    if code != 0:
-        raise RuntimeError(_kubectl_value(code, out, f"Failed to inject OOM on {dep}"))
-    _kubectl("delete", "pods", "-n", cfg.NAMESPACE, "-l", app["pod_label"], "--wait=false")
-
-
-def _clear_app_oom_override(app: dict) -> None:
-    dep = app["deployment"]
-    patch = _patch_file(
-        f"clear-oom-{dep}.json",
-        '[{"op":"remove","path":"/spec/template/spec/containers/0/resources"}]',
-    )
-    _kubectl(
-        "patch", "deployment", dep, "-n", cfg.NAMESPACE,
-        "--type", "json", f"--patch-file={patch}",
-    )
+def _error_mode_label(mode: str) -> str:
+    return failure_mode_label(mode)
 
 
 _INTENT_FILLERS = re.compile(
@@ -1458,10 +1853,16 @@ _ROOT_CAUSE_PHRASES = (
     "what break",
     "what happened",
     "what went wrong",
+    "what caused",
+    "caused this outage",
     "root cause",
     "what failed",
     "what's broken",
     "whats broken",
+    "not working",
+    "why is",
+    "why isn't",
+    "why are",
 )
 
 
@@ -1776,13 +2177,26 @@ def _incident_context_for_app(app: dict) -> dict:
     code, pod_line = _kubectl(
         "get", "pods", "-n", cfg.NAMESPACE, "-l", pod_label, "--no-headers",
     )
-    ctx["pod_line"] = _kubectl_value(code, pod_line, "no pods")
-    if code == 0 and pod_line.strip():
-        ctx["pod_name"] = pod_line.strip().split()[0]
-        parts = pod_line.strip().split()
-        if len(parts) >= 4:
-            ctx["pod_reason"] = parts[3]
+    structured = _fetch_pods_for_label(pod_label)
+    if structured:
+        ctx["pod_line"] = "\n".join(p["line"] for p in structured[:3])
+        primary = structured[0]
+        ctx["pod_name"] = primary["name"]
+        ctx["pod_phase"] = primary["phase"]
+        ctx["pod_reason"] = primary["reason"] or primary["phase"]
+        ctx["pod_message"] = primary.get("message", "")
+    else:
+        ctx["pod_line"] = _kubectl_value(code, pod_line, "no pods")
+        if code == 0 and pod_line.strip():
+            ctx["pod_name"] = pod_line.strip().split()[0]
     ctx["events"] = _kubectl_events_findings(cfg.NAMESPACE, limit=6, pod_name=ctx["pod_name"])
+    code_ann, ann = _kubectl(
+        "get", "deployment", dep, "-n", cfg.NAMESPACE,
+        "-o", "jsonpath={.metadata.annotations.enlight-lab/injected-modes}",
+    )
+    if code_ann == 0 and ann.strip():
+        ctx["injected_modes"] = [m.strip() for m in ann.split(",") if m.strip()]
+        ctx["injected_summary"] = describe_expected_failure(ctx["injected_modes"])
     return ctx
 
 
@@ -1798,6 +2212,29 @@ def _plain_language_explain(ctx: dict) -> tuple[str, list[str], str, str]:
     image_l = image.lower()
     app_label = ctx.get("app_label") or "staging app"
     dep_name = ctx.get("deployment") or cfg.DEPLOYMENT_NAME
+    injected = ctx.get("injected_modes") or []
+
+    if injected:
+        primary_mode = injected[0]
+        headline, root, simple = failure_mode_layman_explain(primary_mode, app_label)
+        labels = ", ".join(failure_mode_label(m) for m in injected)
+        summary = ctx.get("injected_summary") or describe_expected_failure(injected)
+        ev_lines = [e for e in (ctx.get("events") or [])[:3] if e]
+        pod_note = ctx.get("pod_line") or "unknown"
+        if "crashloop" in reason_l and primary_mode == "startup":
+            simple += (
+                "\n\n*Note: CrashLoopBackOff can appear after startup probe retries — "
+                "the injected failure is still **startup probe failure**, not a generic crash.*"
+            )
+        bullets = [
+            f"Injected failure: **{labels}**",
+            summary,
+            f"Current pod: `{pod_note}`",
+            *ev_lines,
+        ]
+        if reason and root.lower() not in reason_l:
+            bullets.append(f"Observed pod reason: {reason}")
+        return headline, bullets, root, simple
 
     if replicas == 0:
         return (
@@ -1829,6 +2266,32 @@ def _plain_language_explain(ctx: dict) -> tuple[str, list[str], str, str]:
             f"In simple terms: we pointed {app_label} at a container image that does not exist in the registry — "
             "like giving a delivery driver a wrong address. Kubernetes keeps retrying but the pod never starts, "
             "so clients see the app as down. Your Git repo still has the correct image; only the live cluster is wrong.",
+        )
+
+    if "oomkilled" in reason_l:
+        return (
+            f"{app_label} container was killed for exceeding its memory limit (OOMKilled).",
+            [
+                f"Pod {ctx['pod_name'] or dep_name} — {reason}.",
+                ctx["pod_message"][:160] if ctx["pod_message"] else "Container exceeded memory limit (exit 137).",
+                "Kubernetes restarts the container; memory pressure continues until limits are fixed.",
+            ],
+            reason or "OOMKilled",
+            f"In simple terms: {app_label} used more RAM than its limit allows. "
+            "Kubernetes killed the container to protect the node — you'll see OOMKilled in events.",
+        )
+
+    if "failedcreatepodsandbox" in reason_l or "memory limit" in (ctx.get("pod_message") or "").lower():
+        return (
+            f"{app_label} cannot start — invalid pod memory configuration.",
+            [
+                f"Pod event: {reason or 'FailedCreatePodSandBox'}.",
+                (ctx["pod_message"] or "Memory limit below runtime minimum.")[:200],
+                "Fix resources.limits.memory in the deployment (use at least 32Mi).",
+            ],
+            reason or "FailedCreatePodSandBox",
+            "In simple terms: the pod was rejected before the app could start because "
+            "the memory limit in the manifest is too low for the container runtime.",
         )
 
     if "crashloopbackoff" in reason_l or reason_l == "error":
@@ -2296,9 +2759,13 @@ def _direct_gemini_chat(
     prompt = (
         f"{history_block}"
         "You are Cluster Command Deck — a workload-agnostic Kubernetes assistant on enlight-staging.\n"
+        "You run inside a Python backend (selfheal-ui) that ALREADY executes real kubectl against the live "
+        "cluster when users ask to simulate outages, deploy, auto-fix, reset, or show status. "
+        "Those actions run server-side in the pod — no MCP or user terminal required.\n"
         "Treat FastAPI, Nginx, and any service the user names with equal priority — never assume FastAPI.\n"
         "Map typos (outrage→outage, ngnix→nginx, auto fiz→auto-fix) before answering.\n"
         "For errors: explain root cause, show realistic kubectl/bash in code blocks, suggest remediation.\n"
+        "If asked whether you can run commands: yes — via this backend, not from the browser directly.\n"
         f"LIVE CLUSTER FACTS (authoritative):\n{facts}\n\n"
         f"User question: {message}\n\n"
         f"{lang_note} Answer only what the user asked. Use markdown when helpful."
@@ -2642,16 +3109,27 @@ def _run_holmes_investigation(ctx: dict) -> tuple[bool, str, str]:
     return _run_holmes_cli(ctx)
 
 
-    return key.startswith(("AIza", "AQ."))
-
-
 # --- Chat-first actions (natural language deploy / outage / heal) ---
 
 def _app_pod_summary(app: dict) -> str:
-    code, pods = _kubectl(
-        "get", "pods", "-n", cfg.NAMESPACE, "-l", app["pod_label"], "--no-headers",
+    if not _app_workloads_exist(app):
+        return "not deployed"
+    return _pod_display_line(app["pod_label"])
+
+
+def _app_injected_modes(app: dict) -> list[str]:
+    dep = app["deployment"]
+    code, ann = _kubectl(
+        "get", "deployment", dep, "-n", cfg.NAMESPACE,
+        "-o", "jsonpath={.metadata.annotations.enlight-lab/injected-modes}",
     )
-    return _kubectl_value(code, pods, "not deployed")
+    if code != 0 or not ann.strip():
+        return []
+    return [m.strip() for m in ann.split(",") if m.strip()]
+
+
+def _app_has_active_injection(app: dict) -> bool:
+    return bool(_app_injected_modes(app))
 
 
 def _app_workloads_exist(app: dict) -> bool:
@@ -2660,15 +3138,19 @@ def _app_workloads_exist(app: dict) -> bool:
 
 
 def _app_is_healthy(app: dict) -> bool:
+    if _app_has_active_injection(app):
+        return False
     if not _app_workloads_exist(app):
         return False
-    code, pods = _kubectl(
-        "get", "pods", "-n", cfg.NAMESPACE, "-l", app["pod_label"], "--no-headers",
-    )
-    line = _kubectl_value(code, pods, "")
-    if not line or line in ("no pods", "not deployed"):
+    detail = _pod_detail_for_label(app["pod_label"])
+    line = detail.get("line", "")
+    if not line or line == "no pods":
         return False
-    if "Running" not in line or "1/1" not in line:
+    if "1/1" not in line:
+        return False
+    if detail.get("container_errors"):
+        return False
+    if "Running" not in line and "Succeeded" not in line:
         return False
     url = app.get("health_url") or ""
     return _reachable(url) if url else True
@@ -2713,22 +3195,60 @@ def _apps_status_for_target(target: str) -> list[dict]:
     return [r for r in rows if r["id"] == target]
 
 
+def _inject_summary_item(app_id: str, modes: list[str], pod_line: str, *, healthy: bool = False) -> dict:
+    app = cfg.demo_app(app_id)
+    injected = _app_has_active_injection(app)
+    expected = expected_signals_for_modes(modes)
+    detail = _pod_detail_for_label(app["pod_label"])
+    # Injection stamp is source of truth — outage is active even when pod stays Running (network chaos).
+    outage_active = injected or bool(modes)
+    service_level = any(m in SERVICE_LEVEL_MODE_IDS for m in modes)
+    return {
+        "app": app_id,
+        "label": app["label"],
+        "modes": inject_mode_chips(modes),
+        "expected_signals": expected,
+        "expected_summary": describe_expected_failure_plain(modes),
+        "service_level": service_level,
+        "links": _app_browser_links(app_id),
+        "pod_line": detail["line"] or pod_line,
+        "container_errors": detail.get("container_errors") or [],
+        "healthy": False if outage_active else healthy,
+        "injected": outage_active,
+    }
+
+
 def _action_result_payload(
     action: str,
     target: str,
     message: str,
     *,
+    include_cards: bool = False,
     links: dict | None = None,
+    heal_summary: list[dict] | None = None,
+    inject_summary: list[dict] | None = None,
+    timeline: list[dict] | None = None,
 ) -> dict:
-    """Standard chat action response with status cards (no exposed URL text)."""
-    payload = {
+    """Chat action response — status cards only when user asked for status/links."""
+    payload: dict = {
         "action": action,
         "target": target,
+        "action_target": target,
         "message": _strip_markdown_links(message),
-        "apps_status": _apps_status_for_target(target),
-        "ui": "status_cards",
         "links": links or resolved_public_app_links(),
     }
+    if heal_summary:
+        payload["heal_summary"] = heal_summary
+        payload["ui"] = "heal_summary"
+    if inject_summary:
+        payload["inject_summary"] = inject_summary
+        payload["ui"] = "inject_summary"
+    if timeline:
+        payload["timeline"] = timeline
+    if include_cards:
+        payload["apps_status"] = _apps_status_for_target(target)
+        if not heal_summary and not inject_summary:
+            payload["ui"] = "status_cards"
     return payload
 
 
@@ -2856,90 +3376,91 @@ def reset_demo_app(app_id: str, on_step: StepCallback = None) -> dict:
     raise ValueError(f"Unknown app {app_id}")
 
 
-def _simulate_app_error_impl(app_id: str, message: str = "") -> dict:
-    """Inject a demo-safe failure on any registered workload (not only bad-image)."""
+def _simulate_app_error_impl(
+    app_id: str,
+    message: str = "",
+    *,
+    mode: str | list[str] | None = None,
+) -> dict:
+    """Inject demo-safe failure(s) on any registered workload."""
     app = cfg.demo_app(app_id)
-    mode = _classify_error_mode(message)
+    if isinstance(mode, list):
+        modes = [m.lower() for m in mode if m]
+    elif mode:
+        modes = [mode.lower()]
+    else:
+        modes = classify_failure_modes(message)
+    modes = [m if m in {x.id for x in FAILURE_MODES} else classify_failure_mode(m) for m in modes]
+    modes = list(dict.fromkeys(modes))[:4]
     dep = app["deployment"]
-    container = app["container"]
-    bad_image = app.get("bad_image") or cfg.BAD_IMAGE
-    mode_label = _ERROR_MODE_LABELS.get(mode, mode)
+    mode_label = ", ".join(failure_mode_label(m) for m in modes)
 
     timeline: list[dict[str, str]] = []
     ok, cluster_msg = _cluster_reachable()
     if not ok:
         raise RuntimeError(cluster_msg)
 
+    _timeline_step(timeline, "Clearing prior demo injections", dep, phase="break")
+    clear_all_failure_injections(app)
+
     _timeline_step(
         timeline,
         f"Preparing {mode_label} simulation for {app['label']}",
-        "Safe for staging — production is not touched",
+        f"{len(modes)} failure mode(s) — staging only",
         phase="break",
     )
-    if app_id == "fastapi":
-        _timeline_step(timeline, "Pausing Argo CD auto-sync", "So GitOps won't heal before auto-fix")
-        _pause_argocd_autosync()
+    _pause_gitops_for_injection(app, timeline)
 
-    _kubectl_must(
-        "scale", f"deployment/{dep}",
-        "-n", cfg.NAMESPACE, "--replicas=1",
-        action=f"Ensure {dep} is running before injection",
-    )
+    if not _app_workloads_exist(app):
+        raise RuntimeError(
+            f"**{app['label']}** is not deployed — run **deploy {app_id}** first, then simulate again."
+        )
+
+    if "instant" not in modes:
+        _kubectl_must(
+            "scale", f"deployment/{dep}",
+            "-n", cfg.NAMESPACE, "--replicas=1",
+            action=f"Ensure {dep} is running before injection",
+        )
 
     kubectl_log: list[str] = []
-    if mode == "instant":
-        _timeline_step(timeline, "Scaling deployment to zero replicas", dep, phase="break")
-        cmd = f"kubectl scale deployment/{dep} -n {cfg.NAMESPACE} --replicas=0"
-        kubectl_log.append(cmd)
-        _kubectl_must("scale", f"deployment/{dep}", "-n", cfg.NAMESPACE, "--replicas=0", action="Scale to zero")
-    elif mode == "crash":
-        _timeline_step(timeline, "Injecting CrashLoopBackOff", "Container exits immediately on start", phase="break")
-        kubectl_log.append(f"kubectl patch deployment/{dep} -n {cfg.NAMESPACE} --type=json # crash command")
-        _inject_app_crash(app)
-    elif mode == "oom":
-        _timeline_step(timeline, "Injecting OOMKilled scenario", "Memory limit set to 1Mi", phase="break")
-        kubectl_log.append(f"kubectl patch deployment/{dep} -n {cfg.NAMESPACE} --type=json # memory=1Mi")
-        _inject_app_oom(app)
-    elif mode == "pending":
-        _timeline_step(timeline, "Injecting unschedulable pod", "Impossible node selector", phase="break")
-        patch = _patch_file(
-            f"pending-{dep}.json",
-            '[{"op":"add","path":"/spec/template/spec/nodeSelector",'
-            '"value":{"kubernetes.io/hostname":"node-does-not-exist-demo"}}]',
-        )
-        kubectl_log.append(f"kubectl patch deployment/{dep} -n {cfg.NAMESPACE} --type=json # nodeSelector")
-        _kubectl_must(
-            "patch", "deployment", dep, "-n", cfg.NAMESPACE,
-            "--type", "json", f"--patch-file={patch}",
-            action="Inject pending scheduling",
-        )
-    else:
-        mode = "image"
-        mode_label = _ERROR_MODE_LABELS["image"]
-        _timeline_step(timeline, "Patching deployment with invalid image", bad_image, phase="break")
-        cmd = f"kubectl set image deployment/{dep} {container}={bad_image} -n {cfg.NAMESPACE}"
-        kubectl_log.append(cmd)
-        _kubectl_must(
-            "set", "image", f"deployment/{dep}",
-            f"{container}={bad_image}",
-            "-n", cfg.NAMESPACE,
-            action="Inject bad image",
-        )
+    for m in modes:
+        label = failure_mode_label(m)
+        if m == "instant":
+            _timeline_step(timeline, "Scaling deployment to zero replicas", dep, phase="break")
+        else:
+            _timeline_step(timeline, f"Injecting {label}", dep, phase="break")
+    kubectl_log.extend(inject_failure_modes(modes, app))
+    argo_app = app.get("argocd_app") or ""
+    if app.get("gitops") and argo_app:
+        _argocd_refresh_named(argo_app)
 
     _timeline_step(
         timeline,
         "Waiting for failure signals",
-        f"Expect {mode_label} on pod",
+        f"Expect {mode_label} — Argo CD should show Degraded",
         phase="break",
     )
-    deadline = time.time() + (8 if mode == "instant" else 90)
+    deadline = time.time() + (8 if modes == ["instant"] else 60)
     while time.time() < deadline:
-        if mode == "instant":
+        if modes == ["instant"]:
             code, rep = _kubectl(
                 "get", "deployment", dep, "-n", cfg.NAMESPACE,
                 "-o", "jsonpath={.spec.replicas}",
             )
             if code == 0 and rep.strip() == "0":
+                break
+        elif _app_has_active_injection(app):
+            detail = _pod_detail_for_label(app["pod_label"])
+            line = detail.get("line", "")
+            if detail.get("container_errors") or _pod_ready_not_full(line):
+                break
+            if not _app_is_healthy(app):
+                break
+            argo = _argocd_status_for_app(app)
+            if argo and not _argocd_is_synced_healthy(argo) and "Degraded" in argo:
+                break
+            if argo and ("Progressing" in argo or "Unhealthy" in argo):
                 break
         elif not _app_is_healthy(app):
             break
@@ -2949,16 +3470,23 @@ def _simulate_app_error_impl(app_id: str, message: str = "") -> dict:
     _timeline_step(timeline, "Failure active", pod_line, phase="break", pause=False)
 
     klog = "\n".join(kubectl_log)
+    expected_desc = describe_expected_failure(modes)
+    inject_item = _inject_summary_item(app_id, modes, pod_line)
     return {
         "app": app_id,
-        "mode": mode,
+        "mode": modes[0] if len(modes) == 1 else modes,
+        "modes": modes,
         "message": (
-            f"**Simulated {mode_label} on {app['label']}** — pod `{pod_line}`.\n\n"
-            f"```bash\n{klog}\n```\n\n"
-            f"Say **auto-fix {app_id}** to remediate."
+            f"**{mode_label} active on {app['label']}** — failure injected.\n\n"
+            f"{expected_desc}\n\n"
+            f"**Argo CD:** expect **Degraded** or **Progressing** (not Healthy) within ~30s.\n\n"
+            f"**Observed pod state:** `{pod_line}`\n\n"
+            f"Say **auto-fix {app_id}** to remediate, or ask **what broke?** for diagnosis."
         ),
+        "expected_signals": expected_signals_for_modes(modes),
         "pod_line": pod_line,
-        "healthy": _app_is_healthy(app),
+        "healthy": False,
+        "inject_summary": [inject_item],
         "links": _app_browser_links(app_id),
         "timeline": timeline,
         "kubectl_log": klog,
@@ -2970,30 +3498,122 @@ def _simulate_app_outage_impl(app_id: str, message: str = "") -> dict:
 
 
 def simulate_app_outage(app_id: str, on_step: StepCallback = None, message: str = "") -> dict:
+    if not (message or "").strip():
+        return _with_step_stream(on_step, lambda: _simulate_guided_outage_impl(app_id))
     return _with_step_stream(on_step, lambda: _simulate_app_error_impl(app_id, message))
 
 
-def _auto_fix_app_impl(app_id: str) -> dict:
+def inject_outage_plain_english(
+    message: str,
+    *,
+    app_id: str = "fastapi",
+    scenario_id: str | None = None,
+) -> dict:
+    """Plain-English outage API — for MCP, scripts, and automations."""
+    app_key = (app_id or "fastapi").strip().lower()
+    if app_key in ("both", "all"):
+        _pause_gitops_for_demo_apps()
+        results = []
+        for aid in ("fastapi", "nginx"):
+            results.append(inject_outage_plain_english(message, app_id=aid, scenario_id=scenario_id))
+        return {
+            "ok": True,
+            "apps": results,
+            "message": "**Outage applied** to FastAPI and Nginx.",
+        }
+
+    if scenario_id:
+        sc = scenario_by_id(scenario_id)
+        if sc:
+            message = sc.prompt
+            if app_key not in sc.apps and len(sc.apps) == 1:
+                app_key = sc.apps[0]
+            r = _simulate_app_error_impl(app_key, message=message, mode=list(sc.modes))
+            r["scenario"] = sc.id
+            r["ok"] = True
+            return r
+
+    r = _simulate_app_error_impl(app_key, message=message)
+    r["ok"] = True
+    return r
+
+
+def _heal_apply_path_for_app(app: dict) -> Path | None:
+    """Bundled kustomize overlay / manifest dir used to reset a demo workload."""
+    app_id = app.get("id") or ""
     if app_id == "fastapi":
-        return _auto_fix_impl()
-    app = cfg.demo_app(app_id)
+        overlay = cfg.HEAL_OVERLAY_PATH
+        if overlay.is_dir() and (overlay / "kustomization.yaml").is_file():
+            return overlay
+        if cfg.STAGING_APP_PATH.is_dir():
+            return cfg.STAGING_APP_PATH
+        return None
+    if app_id == "nginx":
+        nginx_path = app.get("manifest_path") or cfg.STAGING_NGINX_PATH
+        return nginx_path if nginx_path.is_dir() else None
+    return None
+
+
+def _apply_heal_manifests(app: dict, timeline: list[dict[str, str]], *, fast: bool = False) -> None:
+    """Replace the broken Deployment with the known-good bundled manifests (Recreate strategy)."""
+    path = _heal_apply_path_for_app(app)
+    if not path:
+        return
     dep = app["deployment"]
-    _clear_app_crash_override(app)
-    _clear_app_oom_override(app)
-    _kubectl(
-        "patch", "deployment", dep, "-n", cfg.NAMESPACE,
-        "--type=json",
-        "-p", '[{"op":"remove","path":"/spec/template/spec/nodeSelector"}]',
+    _timeline_step(
+        timeline,
+        "Removing broken deployment",
+        f"{dep} — clean slate before re-apply",
+        pause=not fast,
     )
+    _kubectl(
+        "delete", "deployment", dep, "-n", cfg.NAMESPACE,
+        "--wait=false", "--ignore-not-found",
+    )
+    label = f"kustomize {path}" if (path / "kustomization.yaml").is_file() else str(path)
+    _timeline_step(timeline, "Applying known-good manifests", label, pause=not fast)
+    if (path / "kustomization.yaml").is_file():
+        code, out = _run(_kubectl_cmd("apply", "-k", str(path)), timeout=120)
+    else:
+        code, out = _run(_kubectl_cmd("apply", "-f", str(path)), timeout=120)
+    if code != 0:
+        raise RuntimeError(_kubectl_value(code, out, "Heal manifest apply failed"))
+
+
+def _heal_deployment_for_app(app: dict, timeline: list[dict[str, str]], *, fast: bool = False) -> bool:
+    """Restore a demo deployment to its known-good spec and wait for a healthy pod."""
+    dep = app["deployment"]
+    argo_app = app.get("argocd_app") or ""
+    good_image = app.get("good_image") or cfg.GOOD_IMAGE
+
+    if app.get("gitops") and argo_app:
+        _timeline_step(
+            timeline,
+            "Ensuring Argo CD auto-sync is paused",
+            f"{argo_app} — GitOps won't fight the fix",
+            pause=not fast,
+        )
+        _pause_gitops_for_injection(app)
+
+    _apply_heal_manifests(app, timeline, fast=fast)
+
+    _timeline_step(timeline, "Clearing failure injections", dep)
+    clear_all_failure_injections(app)
+    if app.get("id") == "fastapi":
+        _clear_crash_override()
+
+    _timeline_step(timeline, "Scaling deployment to 1 replica", cfg.NAMESPACE)
     _kubectl_must(
         "scale", f"deployment/{dep}",
         "-n", cfg.NAMESPACE, "--replicas=1",
         action="Scale up",
     )
+
+    _timeline_step(timeline, "Restoring known-good container image", good_image)
     _kubectl_must(
         "set", "image",
         f"deployment/{dep}",
-        f"{app['container']}={app['good_image']}",
+        f"{app['container']}={good_image}",
         "-n", cfg.NAMESPACE,
         action="Restore good image",
     )
@@ -3002,47 +3622,120 @@ def _auto_fix_app_impl(app_id: str) -> dict:
         "--type=json",
         "-p", '[{"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"Always"}]',
     )
+
+    _timeline_step(timeline, "Recycling pods", "Force delete so the good image applies immediately")
     _kubectl(
-        "delete", "pods", "-n", cfg.NAMESPACE, "-l", app["pod_label"], "--wait=false", "--force", "--grace-period=0",
+        "delete", "pods", "-n", cfg.NAMESPACE, "-l", app["pod_label"],
+        "--wait=false", "--force", "--grace-period=0",
     )
-    deadline = time.time() + 90
-    while time.time() < deadline:
-        if _app_is_healthy(app):
-            break
-        time.sleep(3)
-    healthy = _app_is_healthy(app)
-    klog = (
-        f"kubectl scale deployment/{dep} -n {cfg.NAMESPACE} --replicas=1\n"
-        f"kubectl set image deployment/{dep} {app['container']}={app['good_image']} -n {cfg.NAMESPACE}\n"
-        f"kubectl delete pods -n {cfg.NAMESPACE} -l {app['pod_label']}"
+
+    pod_timeout = 90 if fast else 120
+    ready = _wait_pod_ready_with_steps(
+        timeline,
+        pod_label=app["pod_label"],
+        timeout=pod_timeout,
+        title="Waiting for healthy pod",
+    )
+    if not ready:
+        _timeline_step(timeline, "Re-applying heal manifests", "Pod still unhealthy — full reset retry")
+        _apply_heal_manifests(app, timeline, fast=fast)
+        _kubectl_must(
+            "set", "image",
+            f"deployment/{dep}",
+            f"{app['container']}={good_image}",
+            "-n", cfg.NAMESPACE,
+            action="Restore good image",
+        )
+        _kubectl(
+            "delete", "pods", "-n", cfg.NAMESPACE, "-l", app["pod_label"],
+            "--wait=false", "--force", "--grace-period=0",
+        )
+        ready = _wait_pod_ready_with_steps(
+            timeline,
+            pod_label=app["pod_label"],
+            timeout=60,
+            title="Retrying pod readiness",
+        )
+    return ready
+
+
+def _argocd_finalize_heal(app: dict, timeline: list[dict[str, str]], *, fast: bool = False) -> str:
+    """Re-enable GitOps sync after a manual heal."""
+    if not app.get("gitops") or not app.get("argocd_app"):
+        return ""
+    argo_note = ""
+    _timeline_step(timeline, "Re-enabling Argo CD auto-sync", "GitOps policy restored from manifest")
+    restore_code, restore_out = _argocd_restore_for_app(app)
+    if restore_code != 0:
+        argo_note += f" (ArgoCD restore skipped: {(restore_out or '')[:100]})"
+    _argocd_refresh()
+    _timeline_step(timeline, "Triggering Argo CD sync", "Cluster state → Git → Healthy")
+    sync_code, sync_out = _argocd_trigger_sync_named(app["argocd_app"])
+    if sync_code != 0:
+        argo_note += f" (ArgoCD sync skipped: {(sync_out or '')[:80]})"
+    else:
+        argo = _argocd_wait_synced_named(app["argocd_app"], timeout=90 if fast else 120)
+        if not _argocd_is_synced_healthy(argo):
+            _argocd_trigger_sync_named(app["argocd_app"])
+            argo = _argocd_wait_synced_named(app["argocd_app"], timeout=60)
+        if not _argocd_is_synced_healthy(argo):
+            argo_note += f" (GitOps: {argo} — refresh Argo CD in ~30s)"
+    return argo_note
+
+
+def _auto_fix_app_impl(app_id: str, *, fast: bool = False) -> dict:
+    if app_id == "fastapi":
+        return _auto_fix_impl(fast=fast)
+    app = cfg.demo_app(app_id)
+    timeline: list[dict[str, str]] = []
+    ok, cluster_msg = _cluster_reachable()
+    if not ok:
+        raise RuntimeError(cluster_msg)
+
+    _timeline_step(timeline, "Starting recovery", f"Restoring {app['label']}")
+    ready = _heal_deployment_for_app(app, timeline, fast=fast)
+    argo_note = _argocd_finalize_heal(app, timeline, fast=fast)
+    healthy = ready and _app_is_healthy(app)
+    summary = _format_heal_app_summary(app_id, {"healthy": healthy, "app_reachable": healthy})
+    _timeline_step(
+        timeline,
+        "Recovery complete" if healthy else "Recovery applied — verify status",
+        summary["pod_line"],
+        pause=False,
     )
     return {
         "app": app_id,
-        "message": (
-            f"**{app['label']} recovered** — `{_app_pod_summary(app)}`.\n\n"
-            f"```bash\n{klog}\n```\n\n"
-            f"Health check {'passing' if healthy else 'still verifying'}."
-        ),
+        "timeline": timeline,
+        "message": _format_heal_all_message([summary]),
+        "heal_summary": [summary],
         "healthy": healthy,
         "app_reachable": healthy,
-        "pod_line": _app_pod_summary(app),
+        "pod_line": summary["pod_line"],
         "links": _app_browser_links(app_id),
         "open_url": _app_browser_links(app_id).get("dashboard"),
         "staging_url": _app_browser_links(app_id).get("dashboard"),
     }
 
 
-def auto_fix_app(app_id: str, on_step: StepCallback = None) -> dict:
-    return _with_step_stream(on_step, lambda: _auto_fix_app_impl(app_id))
+def auto_fix_app(app_id: str, on_step: StepCallback = None, *, fast: bool = False) -> dict:
+    return _with_step_stream(on_step, lambda: _auto_fix_app_impl(app_id, fast=fast))
 
 
 def _infer_target_from_history(history: list | None) -> str | None:
-    """Resolve pronouns (them, both) from recent chat context."""
+    """Resolve pronouns (it, them, both) from recent chat context."""
     if not history:
         return None
-    blob = " ".join(
-        str(h.get("content") or "") for h in history[-8:]
-    ).lower()
+    for h in reversed(history[-8:]):
+        c = str(h.get("content") or "").lower()
+        has_fastapi = bool(re.search(r"\b(fastapi|fast api|fastapi-\w+)\b", c))
+        has_nginx = bool(re.search(r"\b(nginx|nginx web|nginx-demo)\b", c))
+        if has_fastapi and has_nginx:
+            continue
+        if has_nginx:
+            return "nginx"
+        if has_fastapi:
+            return "fastapi"
+    blob = " ".join(str(h.get("content") or "") for h in history[-8:]).lower()
     has_fastapi = bool(re.search(r"\bfastapi\b", blob))
     has_nginx = bool(re.search(r"\bnginx\b", blob))
     if has_fastapi and has_nginx:
@@ -3056,6 +3749,356 @@ def _infer_target_from_history(history: list | None) -> str | None:
     return None
 
 
+_DEPLOY_SKIP_TOKENS = frozenset({
+    "a", "an", "the", "my", "our", "new", "some", "app", "apps", "application",
+    "applications", "workload", "workloads", "service", "both", "all", "them",
+    "demo", "staging", "cluster",
+})
+
+_KNOWN_WORKLOAD_TOKENS = frozenset({
+    "fastapi", "fast", "api", "fastpi", "python", "nginx", "ngnix", "ngix", "ninx",
+    "web", "frontend", "both", "all", "apps", "applications",
+})
+
+
+def _unsupported_workload_token(message: str) -> str | None:
+    """Return an unsupported workload name when the user names a specific app we don't manage."""
+    q = _normalize_query(message)
+    if not re.search(r"\b(deploy|bring up|launch|install|register|create)\b", q):
+        return None
+    m = re.search(
+        r"\b(?:deploy|bring up|launch|install|register|create)\w*\s+"
+        r"(?:the\s+)?(?:a\s+)?(?:my\s+)?([a-z][a-z0-9_-]*)",
+        q,
+    )
+    if not m:
+        return None
+    token = m.group(1)
+    if token in _DEPLOY_SKIP_TOKENS:
+        return None
+    if token in _KNOWN_WORKLOAD_TOKENS or token.startswith(("fastapi", "nginx")):
+        return None
+    return token
+
+
+def _unsupported_workload_reply(token: str) -> str:
+    labels = " and ".join(a["label"] for a in cfg.demo_apps().values())
+    return (
+        f"**{token.title()}** is not available for deployment in this environment.\n\n"
+        f"Supported workloads are **{labels}** (Argo CD in `{cfg.NAMESPACE}`).\n\n"
+        "Try **deploy fastapi**, **deploy nginx**, or **deploy both apps**."
+    )
+
+
+def _is_dangerous_operation(message: str) -> bool:
+    q = _normalize_query(message)
+    if re.search(r"\bdelete\s+the\s+cluster\b", q):
+        return True
+    if re.search(r"\b(delete|destroy|wipe|nuke)\b.{0,30}\b(cluster|control plane|etcd)\b", q):
+        return True
+    if re.search(r"\b(delete|destroy|remove)\b.{0,20}\b(every|all)\s+namespaces?\b", q):
+        return True
+    return False
+
+
+def _dangerous_operation_reply() -> str:
+    return (
+        "I **cannot delete the cluster or all namespaces** — that would be destructive "
+        "and is blocked in this demo.\n\n"
+        f"I only manage **FastAPI** and **Nginx Web** in namespace `{cfg.NAMESPACE}` on Oracle OKE.\n\n"
+        "To tear down a demo app safely, say **reset fastapi** or **reset nginx**."
+    )
+
+
+def _has_conflicting_instructions(message: str) -> bool:
+    q = _normalize_query(message)
+    if re.search(r"\bdeploy\b", q) and re.search(r"\b(don'?t|do not|never)\s+deploy\b", q):
+        return True
+    pairs = (("fastapi", "fastapi"), ("nginx", "nginx"))
+    for verb, app in pairs:
+        if (
+            re.search(rf"\bdeploy\b.{{0,40}}\b{app}\b", q)
+            and re.search(rf"\b(don'?t|do not|never)\s+deploy\b.{{0,40}}\b{app}\b", q)
+        ):
+            return True
+    return False
+
+
+def _conflicting_instructions_reply() -> str:
+    return (
+        "Your message has **conflicting instructions** (for example, deploy and don't deploy "
+        "the same app).\n\n"
+        "Please clarify — pick one:\n"
+        "- **deploy fastapi** — register FastAPI in Argo CD\n"
+        "- **reset fastapi** — tear down FastAPI only\n"
+        "- **deploy nginx** — deploy only Nginx"
+    )
+
+
+def _impossible_deploy_destination(message: str) -> str | None:
+    q = _normalize_query(message)
+    if not re.search(r"\b(deploy|bring up|launch|install)\b", q):
+        return None
+    m = re.search(r"\b(to|on|into)\s+(aws|amazon|azure|gcp|google cloud|production|prod)\b", q)
+    if m:
+        return m.group(2)
+    if re.search(r"\baws\b", q) and re.search(r"\bdeploy\b", q):
+        return "aws"
+    return None
+
+
+def _impossible_deploy_reply(dest: str) -> str:
+    label = dest.upper().replace("GOOGLE CLOUD", "GCP")
+    return (
+        f"I **cannot deploy to {label}** from this chatbot.\n\n"
+        f"This environment only deploys **FastAPI** and **Nginx Web** to **Oracle OKE** "
+        f"namespace `{cfg.NAMESPACE}` via Argo CD.\n\n"
+        "Try **deploy fastapi** or **deploy nginx** for the staging demo."
+    )
+
+
+def _try_compound_deploy_break(message: str) -> tuple[str, str] | None:
+    """Parse 'deploy X and break Y' when X and Y differ."""
+    q = _normalize_query(message)
+    if not re.search(r"\bdeploy\b", q) or not re.search(r"\b(break|inject|simulate|cause)\b", q):
+        return None
+    deploy_t = "fastapi" if re.search(r"\bdeploy\b.{0,40}\bfastapi\b", q) else (
+        "nginx" if re.search(r"\bdeploy\b.{0,40}\bnginx\b", q) else None
+    )
+    break_t = "nginx" if re.search(r"\b(break|inject|simulate|cause)\b.{0,40}\bnginx\b", q) else (
+        "fastapi" if re.search(r"\b(break|inject|simulate|cause)\b.{0,40}\bfastapi\b", q) else None
+    )
+    if deploy_t and break_t and deploy_t != break_t:
+        return deploy_t, break_t
+    return None
+
+
+def _is_diagnosis_question(message: str) -> bool:
+    if _wants_layman_explain(message) or _is_root_cause_question(message):
+        return True
+    q = _intent_query(message)
+    return bool(re.search(
+        r"\b(why (is|isn'?t|are|aren'?t)|not working|what caused|caused (this )?outage|"
+        r"service (is )?down|outage on)\b",
+        q,
+    ))
+
+
+def _try_scoped_diagnosis_reply(message: str, history: list | None) -> str | None:
+    """Plain-English RCA scoped to one demo app — avoids 40-mode catalog and cross-app noise."""
+    if not _is_diagnosis_question(message):
+        return None
+    target = _resolve_app_target(message, history) or _infer_target_from_history(history)
+    if not target or target == "all":
+        return None
+    app = cfg.demo_app(target)
+    ctx = _incident_context_for_app(app)
+    tree = _argocd_app_tree_for_app(app, ctx)
+    lang = _resolved_language(message, history)
+    return _demo_rca_fallback_reply(ctx, tree, lang)
+
+
+def _wants_repeat_same_outage(message: str) -> bool:
+    q = _normalize_query(message)
+    return bool(re.search(
+        r"\b(same\s+(outage|failure|error|scenario|issue)|inject\s+(the\s+)?same|"
+        r"repeat\s+(the\s+)?(same\s+)?(outage|failure)|outage\s+again)\b",
+        q,
+    )) or bool(re.search(r"\b(again|one more)\b", q) and re.search(r"\b(inject|outage|failure)\b", q))
+
+
+def _last_failure_injection_from_history(
+    history: list | None,
+) -> tuple[str | None, list[str] | None]:
+    """Recover workload + failure modes from the most recent inject command in chat."""
+    if not history:
+        return None, None
+    last_target: str | None = None
+    last_modes: list[str] | None = None
+    for h in reversed(history[-12:]):
+        if h.get("role") != "user":
+            continue
+        c = str(h.get("content") or "")
+        q = _normalize_query(c)
+        if not re.search(r"\b(simulat\w*|stimulat\w*|inject|trigger|cause|break)\b", q):
+            continue
+        if re.search(r"\b(same\s+outage|inject\s+the\s+same)\b", q):
+            continue
+        modes = classify_failure_modes(c)
+        target = _resolve_app_target(c, history)
+        if modes:
+            last_modes = modes
+        if target:
+            last_target = target
+        if last_modes:
+            break
+    return last_target, last_modes
+
+
+def _is_deployable_apps_question(message: str) -> bool:
+    q = _normalize_query(message)
+    return bool(re.search(
+        r"which (applications?|apps?|workloads?).*(can you )?(deploy|bring up|launch)",
+        q,
+    )) or bool(re.search(r"what (apps?|applications?|workloads?) can you deploy", q))
+
+
+def _scoped_apps_status(rows: list[dict] | None, target: str | None) -> list[dict] | None:
+    """When an action targets one app, never return the other app's status card."""
+    if not rows or not target or target == "all":
+        return rows
+    scoped = [r for r in rows if r.get("id") == target]
+    return scoped or rows
+
+
+def _deployable_apps_reply() -> str:
+    lines = [f"I can deploy these workloads in namespace `{cfg.NAMESPACE}`:\n"]
+    for app in cfg.demo_apps().values():
+        lines.append(f"- **{app['label']}** — {app['blurb']}")
+    lines.append(
+        "\nSay **deploy fastapi**, **deploy nginx**, or **deploy both apps**."
+    )
+    return "\n".join(lines)
+
+
+def _try_curated_info_reply(message: str) -> str | None:
+    """Deterministic answers for common cluster/app questions (consistent bullet formatting)."""
+    q = _normalize_query(message)
+    if _is_deployable_apps_question(message):
+        return _deployable_apps_reply()
+    if re.search(r"which (application|app).*(api doc|swagger|openapi|/docs)", q):
+        return (
+            "**FastAPI** exposes API docs — open the FastAPI app and use `/docs` (Swagger UI) "
+            "or `/redoc`.\n\n"
+            "**Nginx Web** is the static frontend demo (no API docs)."
+        )
+    if re.search(r"which (application|app).*(frontend|front end|web ui|web front)", q):
+        return (
+            "**Nginx Web** is the frontend / static web demo workload.\n\n"
+            "**FastAPI** is the Python API backend (GitOps via Argo CD)."
+        )
+    if re.search(r"what policies.*(protect|deployment)|policies protect deployment", q):
+        return (
+            f"Deployments in **`{cfg.NAMESPACE}`** are protected by:\n\n"
+            "- **Argo CD GitOps** — desired state comes from Git; drift is reconciled or blocked.\n"
+            "- **Kubernetes RBAC** — only authorized operators can mutate workloads.\n"
+            "- **Staging guardrails** — demo chaos and auto-fix are scoped to registered demo apps only.\n\n"
+            "I can only deploy **FastAPI** and **Nginx Web** in this environment."
+        )
+    if re.search(r"which workload.*(oracle oke|oke|oci)|running on oracle oke", q):
+        labels = ", ".join(a["label"] for a in cfg.demo_apps().values())
+        return (
+            f"Both demo workloads (**{labels}**) run on **Oracle OKE** in namespace "
+            f"`{cfg.NAMESPACE}`.\n\n"
+            "- **FastAPI** — `app=fastapi` deployment\n"
+            "- **Nginx Web** — `app=nginx-demo` deployment"
+        )
+    return None
+
+
+def _try_failure_catalog_reply(message: str) -> tuple[str, dict] | None:
+    from failure_modes import (
+        failure_modes_catalog_data,
+        failure_modes_catalog_reply,
+        is_failure_catalog_request,
+    )
+    if not is_failure_catalog_request(message):
+        return None
+    return failure_modes_catalog_reply(), failure_modes_catalog_data()
+
+
+def _demo_health_phrase(healthy: int, total: int, *, already: bool = False) -> str:
+    """Consistent healthy-count wording (QA: '1 of 1 demo applications are healthy')."""
+    if already:
+        if total == 1:
+            return "**The demo application is already healthy**"
+        return f"**All demo apps are already healthy** ({healthy}/{total})"
+    if total == 1:
+        return f"**{healthy} of 1 demo applications are healthy**"
+    if healthy == total:
+        return f"**All {total} demo apps are healthy**"
+    return f"**{healthy} of {total} demo applications are healthy**"
+
+
+def _llm_resolve_target(message: str, history: list | None = None) -> str | None:
+    """Use Gemini to infer workload when regex and history heuristics are ambiguous."""
+    if not cfg.CHAT_LLM_TARGET or not _gemini_key_configured():
+        return None
+    model_full = cfg.resolved_holmes_model()
+    if not model_full.startswith("gemini/"):
+        return None
+    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    model_id = model_full.replace("gemini/", "", 1)
+    history_block = _format_history_block(history)
+    prompt = (
+        f"{history_block}"
+        "You route Kubernetes chat commands for a staging cluster with exactly two demo workloads: "
+        "fastapi (FastAPI API) and nginx (Nginx Web).\n"
+        f"User message: {message}\n\n"
+        "Which workload does the user mean? Consider typos (outrage=outage, stimulate=simulate). "
+        "Pronouns it/this/that refer to the workload from recent messages.\n"
+        "Reply with exactly one word: fastapi, nginx, both, or unknown."
+    )
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model_id}:generateContent?key={key}"
+    )
+    payload = json.dumps({
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0, "maxOutputTokens": 16},
+    }).encode("utf-8")
+    try:
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+        parts = ((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
+        text = " ".join(str(p.get("text", "")) for p in parts).strip().lower()
+        token = re.sub(r"[^a-z]", "", text.split()[0] if text.split() else text)
+        if token in ("fastapi", "nginx"):
+            return token
+        if token == "both":
+            return "all"
+    except Exception as exc:
+        log.debug("LLM target resolution failed: %s", exc)
+    return None
+
+
+def _resolve_action_target(
+    act_type: str,
+    message: str,
+    history: list | None,
+    regex_target: str | None,
+) -> str | None:
+    """Pick workload for a mutating action — regex, then history, then Gemini."""
+    if regex_target:
+        if act_type == "outage" and regex_target == "all" and not _user_wants_both_apps(message):
+            return None
+        return regex_target
+    if act_type == "deploy" and _unsupported_workload_token(message):
+        return None
+    if act_type not in ("deploy", "reset", "outage", "heal", "explain"):
+        return None
+    if act_type == "outage":
+        if _user_wants_both_apps(message):
+            return "all"
+        explicit = _resolve_app_target(message, history)
+        if explicit and explicit != "all":
+            return explicit
+        from_history = _infer_target_from_history(history)
+        if from_history and from_history != "all":
+            return from_history
+        return None
+    from_history = _infer_target_from_history(history)
+    if from_history:
+        return from_history
+    return _llm_resolve_target(message, history)
+
+
 def _resolve_app_target(message: str, history: list | None = None) -> str | None:
     q = _normalize_query(message)
     if re.search(
@@ -3066,9 +4109,11 @@ def _resolve_app_target(message: str, history: list | None = None) -> str | None
         return "all"
     if re.search(r"\b(nginx|ngnix|ngix|ninx|web front|frontend|web app)\b", q):
         return "nginx"
-    if re.search(r"\b(fastapi|fastpi|fast api|python api|api app)\b", q):
+    if re.search(r"\b(fastapi|fastpi|fast api|fastapitapi|python api|api app)\b", q):
         return "fastapi"
-    if re.search(r"\b(them|they|those)\b", q):
+    if re.search(r"\b(them|they|those|it|this|that)\b", q):
+        return _infer_target_from_history(history)
+    if re.search(r"\b(another|one more|again|same)\b", q):
         return _infer_target_from_history(history)
     return None
 
@@ -3099,20 +4144,28 @@ def _capabilities_reply() -> str:
 
 
 def _apps_status_data() -> list[dict]:
-    """Structured status for rich chat cards — only shown when user asks."""
+    """Structured status for rich chat cards — respects active chaos injection stamp."""
     rows = []
     for app_id, app in cfg.demo_apps().items():
         exists = _app_workloads_exist(app)
-        healthy = _app_is_healthy(app) if exists else False
-        pod = _app_pod_summary(app) if exists else "not deployed"
-        if not exists:
-            state, state_key = "Not deployed", "idle"
-        elif healthy:
-            state, state_key = "Healthy", "ok"
-        else:
-            state, state_key = "Unhealthy", "bad"
-        gitops = _argocd_status_for_app(app)
+        injected_modes = _app_injected_modes(app) if exists else []
+        injected = bool(injected_modes)
+        detail = _pod_detail_for_label(app["pod_label"]) if exists else {"line": "not deployed", "container_errors": []}
+        pod = _pod_line_with_injection(app, detail["line"]) if exists else detail["line"]
+        gitops = _argocd_status_for_app(app) if exists else ""
         links = _app_browser_links(app_id)
+
+        if not exists:
+            state, state_key, healthy = "Not deployed", "idle", False
+        elif injected:
+            state, state_key, healthy = "Outage active", "bad", False
+        elif _app_is_healthy(app):
+            state, state_key, healthy = "Healthy", "ok", True
+        elif _app_heal_phase(app) == "recovering":
+            state, state_key, healthy = "Recovering", "warn", False
+        else:
+            state, state_key, healthy = "Unhealthy", "bad", False
+
         rows.append({
             "id": app_id,
             "label": app["label"],
@@ -3120,8 +4173,12 @@ def _apps_status_data() -> list[dict]:
             "state": state,
             "state_key": state_key,
             "pod_line": pod,
+            "container_errors": detail.get("container_errors") or [],
             "deployed": exists,
             "healthy": healthy,
+            "injected": injected,
+            "injected_modes": injected_modes,
+            "injected_mode_labels": [failure_mode_label(m) for m in injected_modes],
             "gitops": gitops,
             "links": links,
         })
@@ -3171,11 +4228,40 @@ def _cluster_greeting_reply(message: str = "") -> str:
     return "\n".join(lines)
 
 
+def _is_inject_or_outage_intent(message: str) -> bool:
+    """True when the user wants to simulate/inject a failure (not check status)."""
+    q = _normalize_query(message)
+    if re.search(r"\b(simulat\w*|stimulat\w*|inject|trigger|cause|break)\b", q):
+        return True
+    if re.search(
+        r"\b(crash\s*loop|crashloop|oom|probe|outage|failure|chaos|image\s*pull|"
+        r"network\s*policy|pending|readiness|liveness|startup)\b",
+        q,
+    ) and re.search(r"\b(simulat\w*|stimulat\w*|inject|cause|break)\b", q):
+        return True
+    return False
+
+
+def _user_wants_both_apps(message: str) -> bool:
+    q = _normalize_query(message)
+    return bool(re.search(
+        r"\b(both|all apps|all applications|everything|each app|both of them|"
+        r"all of them|all my apps|my apps|the two apps|two apps|them both)\b",
+        q,
+    ))
+
+
 def _needs_status_disambiguation(message: str) -> bool:
     q = _normalize_query(message)
     if _resolve_app_target(message):
         return False
-    return bool(re.search(r"\b(pod status|show status|status|show pods|pod details|apps status|cluster status)\b", q))
+    if _is_inject_or_outage_intent(message):
+        return False
+    return bool(re.search(
+        r"\b(pod status|show status|show pods|pod details|apps status|cluster status|"
+        r"is (my |the )?app healthy)\b",
+        q,
+    ))
 
 
 def _status_disambiguation_reply() -> tuple[str, list[dict[str, str]]]:
@@ -3192,7 +4278,35 @@ def _status_disambiguation_reply() -> tuple[str, list[dict[str, str]]]:
     )
 
 
-def _action_target_disambiguation(action: str) -> tuple[str, list[dict[str, str]]]:
+def _outage_target_disambiguation(message: str) -> tuple[str, list[dict[str, str]]]:
+    """App picker for failure injection — preserves the failure type in each choice."""
+    q = _normalize_query(message)
+    failure_part = re.sub(
+        r"^\s*(please\s+)?(simulat\w*|stimulat\w*|inject|trigger|cause|break)\w*\s+",
+        "",
+        q,
+    ).strip()
+    if not failure_part or failure_part in ("outage", "failure", "error"):
+        failure_part = "an outage"
+
+    def _prompt(app_id: str) -> str:
+        app_phrase = "both apps" if app_id == "all" else app_id
+        return f"Simulate {failure_part} on {app_phrase}"
+
+    label = failure_part if failure_part != "an outage" else "this failure"
+    return (
+        f"Which workload should I inject **{label}** on?",
+        [
+            {"label": "FastAPI API", "prompt": _prompt("fastapi")},
+            {"label": "Nginx Web", "prompt": _prompt("nginx")},
+            {"label": "Both apps", "prompt": _prompt("all")},
+        ],
+    )
+
+
+def _action_target_disambiguation(action: str, message: str = "") -> tuple[str, list[dict[str, str]]]:
+    if action == "outage" and message:
+        return _outage_target_disambiguation(message)
     verbs = {
         "deploy": "deploy",
         "reset": "reset",
@@ -3215,12 +4329,19 @@ def _classify_chat_action(message: str, history: list | None = None) -> tuple[st
     """Return (action, app_target). action=chat means no cluster mutation."""
     q = _normalize_query(message)
     target = _resolve_app_target(message, history)
+    if _wants_inject_commands_explanation(message):
+        return "inject_commands", target or _infer_target_from_history(history) or "all"
+    if _wants_manual_fix_commands(message):
+        return "manual_fix", target or _infer_target_from_history(history) or "all"
     if _is_capabilities_question(message):
         return "capabilities", None
     if re.search(r"\b(how many apps?|number of apps?|count (my )?apps?|apps do i have|apps are there)\b", q):
         return "app_count", "all"
     if re.search(r"\b(pod status|show pods|pod details|show pod|app status)\b", q) and target:
         return "app_status", target
+    if re.search(r"\b(check|verify|properly|working|running ok|running properly)\b", q) and target:
+        if not re.search(r"\b(simulat|inject|deploy|fix|heal|break)\b", q):
+            return "app_status", target
     if re.search(r"\b(open|show|give)\b", q) and re.search(r"\b(links?|url|dashboard|app)\b", q):
         return "links", target or "all"
     if re.search(r"\b(show status|cluster status|apps status|all status|cluster snapshot|show snapshot|cluster health)\b", q):
@@ -3236,8 +4357,26 @@ def _classify_chat_action(message: str, history: list | None = None) -> tuple[st
     if re.search(
         r"\b(simulat\w*|stimulat\w*|inject|trigger|cause)\b", q,
     ) and re.search(
-        r"\b(outage|outrage|failure|error|crash|oom|down|broken|pending)\b", q,
+        r"\b(outage|outrage|failure|error|crash|oom|down|broken|pending|"
+        r"restart|restarting|continuously|crashloop)\b",
+        q,
     ):
+        return "outage", target
+    if re.search(r"\b(cause|inject|trigger|simulate|break)\b", q) and re.search(
+        r"\b(restart|restarting|continuously|crash\s*loop|crashloop|keeps restarting)\b",
+        q,
+    ):
+        return "outage", target
+    if re.search(r"\b(one more|another)\b", q) and re.search(r"\b(outage|outrage)\b", q):
+        return "outage", target
+    if re.search(r"\b(volume mount|mount failure|volumemount)\b", q):
+        return "outage", target
+    if re.search(
+        r"\b(crash\s*loop|crashloop|oom|out of memory|readiness|liveness|configmap|config map|"
+        r"init\s*container|image\s*pull|imagepull|pending|unschedulable|cpu throttl|hostpath|"
+        r"privileged|secret env|startup probe|bad command|probe fail)\b",
+        q,
+    ) and re.search(r"\b(simulat\w*|stimulat\w*|inject|trigger|cause|break)\b", q):
         return "outage", target
     if re.search(r"\b(simulate outage|simulate an outage|break the app|break app|cause outage)\b", q):
         return "outage", target
@@ -3245,8 +4384,17 @@ def _classify_chat_action(message: str, history: list | None = None) -> tuple[st
         return "outage", target
     if re.search(r"\b(broken|failing|down)\b", q) and re.search(r"\b(simulat|inject|cause)\b", q):
         return "outage", target
-    if re.search(r"\b(auto-?fix|self-?heal|heal|restore|recover)\b", q):
-        if re.search(r"\b(both|all|them|everything|cluster|any issues|issues)\b", q) or target == "all":
+    # Chaos Lab cards — "Crash loop and OOM on fastapi" (no "simulate" verb)
+    if re.search(
+        r"\b(crash\s*loop|crashloop|\boom\b|image\s*pull|network\s*policy|bad\s*rollout|"
+        r"rollout\s*stuck|pvc\s*pending|volume\s*mount|http\s*500|memory\s*leak|cpu\s*stress|"
+        r"dns\s*failure|network\s*delay|high\s*latency|port\s*mismatch|network\s*loss|"
+        r"instant\s*outage|gitops|storage\s*storm|meltdown|nightmare|disaster)\b",
+        q,
+    ) and re.search(r"\bon\s+(fastapi|nginx|both(\s+apps)?)\b", q):
+        return "outage", target
+    if re.search(r"\b(auto-?fix|self-?heal|heal|restore|recover|fix)\b", q):
+        if re.search(r"\b(both|all|them|everything|cluster|any issues|issues|my apps|apps)\b", q) or target == "all":
             return "heal", "all"
         return "heal", target
     if re.search(r"\bfix (it|this|the app|nginx|fastapi|them)\b", q):
@@ -3266,8 +4414,27 @@ def _execute_chat_action(
     target: str | None,
     on_step: StepCallback,
     message: str = "",
+    history: list | None = None,
 ) -> dict:
     """Run a mutating demo action from chat; returns action metadata + message."""
+    if action == "inject_commands":
+        t = target or "all"
+        return {
+            "action": action,
+            "target": t,
+            "message": _inject_commands_reply(t, history),
+            "apps_status": _apps_status_for_target(t),
+        }
+
+    if action == "manual_fix":
+        t = target or "all"
+        return {
+            "action": action,
+            "target": t,
+            "message": _manual_fix_commands_reply(t, history),
+            "apps_status": _apps_status_for_target(t),
+        }
+
     if not target:
         raise ValueError("No workload target specified")
 
@@ -3348,8 +4515,25 @@ def _execute_chat_action(
         }
 
     if action == "deploy":
+        bad = _unsupported_workload_token(message)
+        if bad:
+            return {"action": action, "message": _unsupported_workload_reply(bad)}
         step("Deploy requested", target, "git")
         if target == "all":
+            both_exist = all(
+                _app_workloads_exist(cfg.demo_app(a)) for a in ("fastapi", "nginx")
+            )
+            if both_exist:
+                msg, choices = _both_already_deployed_reply()
+                return {
+                    "action": action,
+                    "target": "all",
+                    "message": msg,
+                    "ui": "choices",
+                    "choices": choices,
+                    "apps_status": _apps_status_for_target("all"),
+                    "links": resolved_public_app_links(),
+                }
             deploy_demo_app("fastapi", on_step=on_step)
             deploy_demo_app("nginx", on_step=on_step)
             return _action_result_payload(
@@ -3357,14 +4541,27 @@ def _execute_chat_action(
                 "all",
                 "**Both demo apps deployed.**\n\n"
                 "FastAPI and Nginx are registered in Argo CD. "
-                "Use the cards below to open each app or check GitOps.",
+                "Ask **pod status** to see live health and links.",
+                include_cards=True,
             )
-        deploy_demo_app(target, on_step=on_step)
         app = cfg.demo_app(target)
+        if _app_workloads_exist(app):
+            msg, choices = _already_deployed_reply(target)
+            return {
+                "action": action,
+                "target": target,
+                "message": msg,
+                "ui": "choices",
+                "choices": choices,
+                "apps_status": _apps_status_for_target(target),
+                "links": {target: _app_browser_links(target)},
+            }
+        deploy_demo_app(target, on_step=on_step)
         return _action_result_payload(
             action,
             target,
-            f"**{app['label']} deployed.** Check the card below for pod status and links.",
+            f"**{app['label']} deployed.** Pods should become Ready shortly — ask **pod status** for live state.",
+            include_cards=True,
         )
 
     if action == "reset":
@@ -3372,32 +4569,151 @@ def _execute_chat_action(
         if target == "all":
             reset_demo_app("fastapi", on_step=on_step)
             reset_demo_app("nginx", on_step=on_step)
-            return _action_result_payload(action, "all", "**Reset complete** for FastAPI and Nginx.")
+            return _action_result_payload(action, "all", "**Reset complete** for FastAPI and Nginx.", include_cards=True)
         reset_demo_app(target, on_step=on_step)
         app = cfg.demo_app(target)
-        return _action_result_payload(action, target, f"**{app['label']} reset complete.**")
+        return _action_result_payload(action, target, f"**{app['label']} reset complete.**", include_cards=True)
 
     if action == "outage":
+        if target == "all" and not _user_wants_both_apps(message):
+            msg, choices = _outage_target_disambiguation(message)
+            return {
+                "action": action,
+                "message": msg,
+                "ui": "choices",
+                "choices": choices,
+            }
         step("Simulating failure", target, "break")
-        r = simulate_app_outage(target, on_step=on_step, message=message)
-        app = cfg.demo_app(target)
-        msg = r.get("message") or f"**Outage active on {app['label']}.**"
-        return _action_result_payload(action, target, msg)
-
-    if action == "heal":
-        step("Auto-fix requested", target, "health")
+        if _wants_repeat_same_outage(message):
+            hist_target, hist_modes = _last_failure_injection_from_history(history)
+            if hist_target and not target:
+                target = hist_target
+            if not hist_modes and target and target != "all":
+                app_obj = cfg.demo_app(target)
+                if _app_workloads_exist(app_obj):
+                    hist_modes = _app_injected_modes(app_obj) or None
+            modes = hist_modes or classify_failure_modes(message)
+        else:
+            modes = classify_failure_modes(message)
+        mode_label = ", ".join(failure_mode_label(m) for m in modes)
+        if target and target != "all":
+            app = cfg.demo_app(target)
+            if _app_workloads_exist(app):
+                current = _app_injected_modes(app)
+                if current and set(current) == set(modes):
+                    pod_line = _app_pod_summary(app)
+                    return _action_result_payload(
+                        action,
+                        target,
+                        (
+                            f"{format_active_failure_headline(modes, pod_line)} on **{app['label']}** — "
+                            "same outage as before; no change applied.\n\n"
+                            f"**Observed pod state:** `{pod_line}`\n\n"
+                            "Say **auto-fix** to clear it, or choose a different failure type."
+                        ),
+                        inject_summary=[_inject_summary_item(target, modes, pod_line)],
+                    )
         if target == "all":
-            auto_fix_app("fastapi", on_step=on_step)
-            auto_fix_app("nginx", on_step=on_step)
+            _pause_gitops_for_demo_apps()
+            inject_items: list[dict] = []
+            failed_labels: list[str] = []
+            for app_id in ("fastapi", "nginx"):
+                r = _simulate_app_error_impl(app_id, message=message, mode=modes)
+                inject_items.extend(r.get("inject_summary") or [])
+                if not _app_has_active_injection(cfg.demo_app(app_id)):
+                    failed_labels.append(cfg.demo_app(app_id)["label"])
+            expected_desc = describe_expected_failure(modes)
+            observed = "\n".join(
+                f"- **{it['label']}** — `{it['pod_line']}`" for it in inject_items
+            )
+            pending_note = ""
+            for it in inject_items:
+                line = (it.get("pod_line") or "").lower()
+                if "containercreating" in line or "pending" in line:
+                    pending_note = (
+                        "\n\n**Note:** pods still rolling out — "
+                        "`ContainerCreating` / `Pending` often precedes the expected error "
+                        "(e.g. ErrImagePull) by 15–60s. Refresh **pod status** or check Argo CD events."
+                    )
+                    break
+            body = (
+                f"**{mode_label}** active on **FastAPI and Nginx**.\n\n"
+                f"{expected_desc}\n\n"
+                f"**Observed in cluster:**\n{observed}"
+                f"{pending_note}\n\n"
+                "Apps stay **Outage active** until you run **auto-fix both apps**."
+            )
+            if failed_labels:
+                body += (
+                    f"\n\n**Warning:** injection stamp missing on **{', '.join(failed_labels)}** "
+                    "— Argo CD may have reverted changes. Run **auto-fix both apps**, then simulate again."
+                )
             return _action_result_payload(
                 action,
                 "all",
-                "**Auto-fix complete** for FastAPI and Nginx. Health checks should pass shortly.",
+                body,
+                inject_summary=inject_items,
             )
-        r = auto_fix_app(target, on_step=on_step)
+        r = _with_step_stream(
+            on_step,
+            lambda: _simulate_app_error_impl(target, message=message, mode=modes),
+        )
         app = cfg.demo_app(target)
-        msg = r.get("message") or f"**{app['label']} recovered.**"
-        return _action_result_payload(action, target, msg)
+        msg = r.get("message") or f"**{mode_label} active on {app['label']}.**"
+        return _action_result_payload(
+            action,
+            target,
+            msg,
+            inject_summary=r.get("inject_summary"),
+        )
+
+    if action == "heal":
+        skip = _already_healthy_reply(target)
+        if skip:
+            return _action_result_payload(
+                action,
+                target,
+                skip["message"],
+                include_cards=True,
+                heal_summary=skip.get("heal_summary"),
+            )
+        step("Auto-fix requested", target, "health")
+        if target == "all":
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            results_by_app: dict[str, dict] = {}
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = {
+                    pool.submit(_auto_fix_app_impl, aid, fast=True): aid
+                    for aid in ("fastapi", "nginx")
+                }
+                for fut in as_completed(futures):
+                    aid = futures[fut]
+                    try:
+                        results_by_app[aid] = fut.result()
+                    except Exception as exc:
+                        results_by_app[aid] = {"heal_error": str(exc)}
+            _wait_post_heal_health(["fastapi", "nginx"], timeout=90)
+            summaries = [
+                _format_heal_app_summary(aid, results_by_app.get(aid))
+                for aid in ("fastapi", "nginx")
+            ]
+            return _action_result_payload(
+                action,
+                "all",
+                _format_heal_all_message(summaries),
+                include_cards=True,
+                heal_summary=summaries,
+            )
+        r = auto_fix_app(target, on_step=on_step, fast=True)
+        _wait_post_heal_health([target], timeout=90)
+        summary = _format_heal_app_summary(target, r)
+        return _action_result_payload(
+            action,
+            target,
+            _format_heal_all_message([summary]),
+            include_cards=True,
+            heal_summary=[summary],
+        )
 
     if action == "explain":
         step("Running AI diagnosis", target, "ai")
@@ -3417,23 +4733,21 @@ def holmes_snapshot() -> dict:
     """Live cluster facts for the Holmes chat sidebar (no LLM)."""
     ctx = _incident_context()
     tree = _argocd_app_tree(ctx)
-    healthy = _staging_is_healthy(ctx)
-    apps_list = []
-    for app_id, app in cfg.demo_apps().items():
-        exists = _app_workloads_exist(app)
-        apps_list.append({
-            "id": app_id,
-            "label": app["label"],
-            "blurb": app["blurb"],
-            "deployed": exists,
-            "healthy": _app_is_healthy(app) if exists else False,
-            "pod_line": _app_pod_summary(app) if exists else "not deployed",
-        })
+    apps_list = _apps_status_data()
+    deployed = [r for r in apps_list if r.get("deployed")]
+    healthy = bool(deployed) and all(r["healthy"] for r in deployed)
     return {
         "ok": True,
         "healthy": healthy,
         "holmes_enabled": cfg.HOLMES_ENABLED,
         "chat_actions_enabled": cfg.CHAT_ACTIONS_ENABLED,
+        "chat_mode": cfg.CHAT_MODE,
+        "chat_modes": ["demo", "agent", "hybrid"],
+        "failure_modes": list_failure_modes(),
+        "failure_modes_by_category": failure_modes_by_category(),
+        "failure_mode_count": len(list_failure_modes()),
+        "chaos_mesh": chaos_mesh_info(),
+        "demo_scenarios": list_demo_scenarios(),
         "model": cfg.resolved_holmes_model(),
         "namespace": cfg.NAMESPACE,
         "deployment": cfg.DEPLOYMENT_NAME,
@@ -3469,6 +4783,12 @@ def _holmes_cluster_facts(ctx: dict, tree: dict) -> str:
             f"  - {app['label']} ({app_id}): deployed={exists}, pod={pod}, gitops={gitops}"
         )
     apps_block = "\n".join(app_lines) if app_lines else "  - none"
+    kubectl_ref = []
+    for app_id, app in cfg.demo_apps().items():
+        kubectl_ref.append(
+            f"  {app_id}: deployment={app['deployment']}, "
+            f"label_selector={app['pod_label']} (NEVER use app=nginx or deployment nginx)"
+        )
     return "\n".join([
         f"namespace: {cfg.NAMESPACE}",
         f"demo_app_count: {len(cfg.demo_apps())} (fastapi + nginx)",
@@ -3480,6 +4800,8 @@ def _holmes_cluster_facts(ctx: dict, tree: dict) -> str:
         f"argocd_health: {tree.get('health_status', 'Unknown')}",
         "demo_apps:",
         apps_block,
+        "kubectl_reference:",
+        "\n".join(kubectl_ref),
         "pods:",
         pods_block,
     ])
@@ -3761,6 +5083,366 @@ def _wants_manual_fix(message: str) -> bool:
     )
 
 
+def _wants_manual_fix_commands(message: str) -> bool:
+    """User wants copy-paste kubectl to fix the active error — every failure mode."""
+    q = _normalize_query(message)
+    if _wants_inject_commands_explanation(message) or _wants_kubectl_check_commands(message):
+        return False
+    if re.search(r"\bauto-?fix\b", q) and not re.search(
+        r"\b(manual|kubectl|command|without|myself|shell)\b", q,
+    ):
+        return False
+    if _wants_manual_fix(message):
+        return True
+    if re.search(r"\bmanual commands? to fix\b", q):
+        return True
+    if re.search(r"\b(command|commands|kubectl|steps)\b", q) and re.search(
+        r"\b(fix|heal|repair|resolve|remediat|recover|correct)\b", q,
+    ):
+        return True
+    if re.search(r"\b(give|show|need|want|list)\b", q) and re.search(
+        r"\b(fix|heal|repair)\b", q,
+    ) and re.search(r"\b(command|commands|kubectl|steps)\b", q):
+        return True
+    if re.search(r"\bhow (do i|to|can i) fix\b", q) and re.search(
+        r"\b(manually|kubectl|command|shell|terminal)\b", q,
+    ):
+        return True
+    return False
+
+
+def _modes_from_pod_symptoms(detail: dict) -> list[str]:
+    """Infer failure mode from live pod line when injection stamp is missing."""
+    blob = " ".join(
+        str(detail.get(k) or "") for k in ("line", "reason", "message", "phase")
+    ).lower()
+    modes: list[str] = []
+    if "errimagepull" in blob or "imagepullbackoff" in blob:
+        modes.append("image")
+    if "crashloop" in blob:
+        modes.append("crash")
+    if "oomkilled" in blob or "oom" in blob:
+        modes.append("oom")
+    if "createcontainerconfigerror" in blob or "mountvolume" in blob:
+        modes.append("volume")
+    if "failedscheduling" in blob or "unschedulable" in blob:
+        modes.append("pending")
+    if "networkpolicy" in blob:
+        modes.append("network_policy")
+    if "0/0" in blob or "replicas=0" in blob:
+        modes.append("instant")
+    return modes
+
+
+def _manual_heal_apply_line(app: dict) -> str:
+    """Repo-relative kubectl apply — matches Cloud Shell tarball layout."""
+    app_id = app.get("id") or ""
+    if app_id == "fastapi":
+        overlay = cfg.HEAL_OVERLAY_PATH
+        if overlay.is_dir() and (overlay / "kustomization.yaml").is_file():
+            return "kubectl apply -k deploy/k8s/staging-heal"
+        return "kubectl apply -f deploy/k8s/staging-app"
+    if app_id == "nginx":
+        return "kubectl apply -f deploy/k8s/staging-nginx"
+    return f"kubectl apply -f deploy/k8s/{app['deployment']}"
+
+
+def _manual_fix_commands_reply(
+    target: str | None,
+    history: list | None = None,
+    lang: str = "en",
+) -> str:
+    """Exact kubectl remediation per failure mode — mirrors Auto-fix under the hood."""
+    from failure_modes import failure_mode_label, kubectl_manual_fix_recipes
+
+    ns = cfg.NAMESPACE
+    resolved = target or _infer_target_from_history(history) or "all"
+    app_ids = list(cfg.demo_apps().keys()) if resolved == "all" else [resolved]
+    hist_modes = _infer_modes_from_history(history)
+
+    lines = [
+        "**Manual fix commands** — same remediation Auto-fix runs (paste into OCI Cloud Shell)\n",
+        f"Namespace: `{ns}`. Run from your repo root: `cd ~/devops-selfheal`\n",
+        "**Naming:** Nginx = deployment `nginx-demo`, label `app=nginx-demo`. "
+        f"FastAPI = deployment `{cfg.DEPLOYMENT_NAME}`, label `{cfg.POD_LABEL}`.\n",
+    ]
+
+    any_work = False
+    for app_id in app_ids:
+        app = cfg.demo_app(app_id)
+        modes = _app_injected_modes(app) or hist_modes
+        if not modes:
+            detail = _pod_detail_for_label(app["pod_label"])
+            if not _app_is_healthy(app) or detail.get("reason"):
+                modes = _modes_from_pod_symptoms(detail)
+        if not modes and not _app_has_active_injection(app) and _app_is_healthy(app):
+            continue
+        if not modes:
+            modes = ["image"]  # default demo outage pattern
+
+        any_work = True
+        dep = app["deployment"]
+        ctr = app["container"]
+        good = app.get("good_image") or cfg.GOOD_IMAGE
+        label = app["pod_label"]
+        argo = app.get("argocd_app") or ""
+        mode_labels = ", ".join(failure_mode_label(m) for m in modes)
+        detail = _pod_detail_for_label(app["pod_label"])
+        pod_hint = detail.get("line") or "check pods below"
+
+        lines.append(f"### {app['label']} — fix **{mode_labels}**")
+        lines.append(f"Current pod: `{pod_hint}`\n")
+        lines.append("```bash")
+        lines.extend(kubectl_manual_fix_recipes(modes, app))
+        if argo:
+            lines.append(f"# Pause Argo CD auto-sync while fixing (GitOps won't fight you)")
+            lines.append(
+                f"kubectl patch application {argo} -n {cfg.ARGOCD_NAMESPACE} "
+                "--type merge -p '{\"spec\":{\"syncPolicy\":{\"automated\":null}}}'"
+            )
+        lines.append(f"kubectl delete deployment {dep} -n {ns} --ignore-not-found --wait=false")
+        lines.append(_manual_heal_apply_line(app))
+        lines.append(f"kubectl scale deployment/{dep} -n {ns} --replicas=1")
+        lines.append(f"kubectl set image deployment/{dep} {ctr}={good} -n {ns}")
+        lines.append(
+            f"kubectl patch deployment/{dep} -n {ns} --type=json "
+            "-p '[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/imagePullPolicy\",\"value\":\"Always\"}]'"
+        )
+        lines.append(
+            f"kubectl annotate deployment/{dep} -n {ns} "
+            "enlight-lab/injected-modes- enlight-lab/injected-by- enlight-lab/argocd-visible-outage- --overwrite"
+        )
+        lines.append(
+            f"kubectl delete pods -n {ns} -l {label} --wait=false --force --grace-period=0"
+        )
+        lines.append(f"kubectl rollout status deployment/{dep} -n {ns}")
+        lines.append(f"kubectl get pods -n {ns} -l {label}")
+        if argo:
+            lines.append(f"# Re-sync Argo CD after pod is healthy")
+            lines.append(
+                f"kubectl patch application {argo} -n {cfg.ARGOCD_NAMESPACE} "
+                "--type merge -p '{\"metadata\":{\"annotations\":{\"argocd.argoproj.io/refresh\":\"hard\"}}}'"
+            )
+        lines.append("```\n")
+
+    if not any_work:
+        if lang == "hi":
+            return "**कोई सक्रिय आउटेज नहीं** — पहले chaos inject करें, फिर manual fix commands पूछें।"
+        return (
+            "**No active outage detected** on the selected apps. "
+            "Inject a failure first, then ask *manual commands to fix the error*.\n\n"
+            "Or say **auto-fix both apps** to heal automatically."
+        )
+
+    lines.append(
+        "These commands match **Guided demo → Auto-fix**. "
+        "Prefer one click? Say **auto-fix fastapi** or **auto-fix both apps**."
+    )
+    return "\n".join(lines)
+
+
+def _wants_inject_commands_explanation(message: str) -> bool:
+    """User asks what kubectl ran for a prior injection — not a new inject request."""
+    q = _normalize_query(message)
+    if re.search(r"\bhow to inject\b", q):
+        return False
+    if re.search(r"\bcommands? you used to inject\b", q):
+        return True
+    if re.search(r"\bwhat (kubectl|commands?) (did you|you) (run|use|execute)\b", q):
+        return True
+    if re.search(r"\bhow did you\b", q) and re.search(r"\b(inject|break|simulate|cause)\b", q):
+        return True
+    if re.search(r"\b(which|what|show|give|list|tell)\b", q) and re.search(
+        r"\b(command|commands|kubectl|cmd)\b", q,
+    ):
+        if re.search(r"\b(used|you run|you use|did you|were run|ran)\b", q):
+            return True
+        if re.search(r"\b(inject|injected|injection|simulate|simulated|chaos)\b", q) and re.search(
+            r"\b(used|you|did|were|ran)\b", q,
+        ):
+            return True
+    return False
+
+
+def _infer_modes_from_history(history: list | None) -> list[str]:
+    """Best-effort mode list from the last assistant outage/inject message."""
+    if not history:
+        return []
+    from failure_modes import classify_failure_modes
+
+    for h in reversed(history[-8:]):
+        if h.get("role") != "assistant":
+            continue
+        blob = str(h.get("content") or "")
+        if not blob.strip():
+            continue
+        if not re.search(
+            r"\b(active on|injected|outage|errimage|crash|failure|chaos|simulate)\b",
+            blob,
+            re.I,
+        ):
+            continue
+        modes = classify_failure_modes(blob)
+        if modes:
+            return modes
+    return []
+
+
+def _inject_commands_reply(target: str | None, history: list | None = None) -> str:
+    """Exact kubectl Enlight Lab ran (or would run) for active chaos — not diagnostic checks."""
+    from failure_modes import failure_mode_label, kubectl_inject_command_recipes
+
+    ns = cfg.NAMESPACE
+    resolved = target or "all"
+    app_ids = list(cfg.demo_apps().keys()) if resolved == "all" else [resolved]
+
+    lines = [
+        "**Injection commands** — what Enlight Lab ran on the cluster\n",
+        f"Namespace: `{ns}`. These are the **inject** steps (not verify/describe commands).\n",
+    ]
+
+    any_active = False
+    hist_modes = _infer_modes_from_history(history)
+
+    for app_id in app_ids:
+        app = cfg.demo_app(app_id)
+        modes = _app_injected_modes(app) or hist_modes
+        if not modes:
+            continue
+        any_active = True
+        mode_labels = ", ".join(failure_mode_label(m) for m in modes)
+        lines.append(f"### {app['label']} — {mode_labels}")
+        lines.append("```bash")
+        if app.get("gitops") and app.get("argocd_app"):
+            argo = app["argocd_app"]
+            lines.append(f"# Pause Argo CD auto-sync (GitOps won't revert chaos before auto-fix)")
+            lines.append(
+                f"kubectl patch application {argo} -n {cfg.ARGOCD_NAMESPACE} "
+                "--type merge -p '{\"spec\":{\"syncPolicy\":{\"automated\":null}}}'"
+            )
+        lines.extend(kubectl_inject_command_recipes(modes, app))
+        lines.append(
+            f"kubectl delete pods -n {ns} -l {app['pod_label']} "
+            "--wait=false --force --grace-period=0  # roll pods to pick up changes"
+        )
+        joined = ",".join(modes)[:240]
+        lines.append(
+            f"kubectl annotate deployment/{app['deployment']} -n {ns} "
+            f"enlight-lab/injected-modes={joined} enlight-lab/injected-by=enlight-selfheal --overwrite"
+        )
+        lines.append("```\n")
+
+    if not any_active:
+        lines.append(
+            "No active chaos stamp on the cluster right now. "
+            "Run a Chaos Lab scenario or say **simulate image pull on both apps**, then ask again.\n"
+        )
+        if hist_modes:
+            labels = ", ".join(failure_mode_label(m) for m in hist_modes)
+            lines.append(f"From recent chat, the last injection looked like: **{labels}**.\n")
+            lines.append("Typical commands for that scenario:\n")
+            for app_id in app_ids:
+                app = cfg.demo_app(app_id)
+                lines.append(f"### {app['label']} (reconstructed)")
+                lines.append("```bash")
+                lines.extend(kubectl_inject_command_recipes(hist_modes, app))
+                lines.append("```\n")
+
+    lines.append(
+        "To **verify** the outage in OCI Cloud Shell, ask: "
+        "*give me commands to check the error in cloud shell*."
+    )
+    return "\n".join(lines)
+
+
+def _wants_kubectl_check_commands(message: str) -> bool:
+    """User wants copy-paste kubectl to verify an outage in Cloud Shell."""
+    q = _normalize_query(message)
+    if re.search(r"\b(fix|heal|repair|resolve|remediat|recover|correct|undo)\b", q):
+        return False
+    if re.search(r"\b(cloud\s*shell|oci\s*shell)\b", q) and re.search(
+        r"\b(command|commands|check|verify|err|error|see|prove|kubectl|exact|excat)\b", q,
+    ):
+        return True
+    if re.search(r"\b(commands?|command)\b.*\b(check|verify|run|shell|cloud)\b", q):
+        return True
+    if re.search(r"\b(give|show|need)\b.*\bcommands?\b", q) and re.search(
+        r"\b(check|verify|shell|kubectl|cloud|error|err)\b", q,
+    ):
+        return True
+    if re.search(r"\b(exact|exactly|excat|prove)\b.*\b(err|error|failure|outage)\b", q):
+        return True
+    if "kubectl" in q and any(w in q for w in ("check", "verify", "describe", "command", "prove")):
+        return True
+    return False
+
+
+def _kubectl_diagnostic_reply(
+    target: str | None = None,
+    message: str = "",
+    history: list[dict] | None = None,
+) -> str:
+    """Exact kubectl for enlight-staging — correct labels, no placeholder brackets."""
+    ns = cfg.NAMESPACE
+    resolved = target or _resolve_app_target(message, history) or _infer_target_from_history(history)
+    if resolved == "all" or not resolved:
+        app_ids = list(cfg.demo_apps().keys())
+    else:
+        app_ids = [resolved]
+
+    lines = [
+        f"**Cloud Shell commands** — namespace `{ns}`\n",
+        "Copy these exactly. **Never** use `app=nginx`, deployment `nginx`, or `<pod-name>` placeholders.\n",
+        f"**Nginx** uses label `app=nginx-demo` and deployment `nginx-demo`. "
+        f"**FastAPI** uses `app=fastapi` and deployment `{cfg.DEPLOYMENT_NAME}`.\n",
+    ]
+
+    lines.append("### Both apps (quick view)")
+    lines.append("```bash")
+    lines.append(f"kubectl get pods,deploy -n {ns}")
+    lines.append(f"kubectl get application -n {cfg.ARGOCD_NAMESPACE} {cfg.ARGOCD_APP} {cfg.NGINX_ARGOCD_APP}")
+    lines.append("```\n")
+
+    for app_id in app_ids:
+        app = cfg.demo_app(app_id)
+        dep = app["deployment"]
+        label = app["pod_label"]
+        detail = _pod_detail_for_label(app["pod_label"])
+        pod_name = detail.get("pod_name") or ""
+        injected = _app_injected_modes(app)
+        lines.append(f"### {app['label']}")
+        lines.append(f"- Deployment: `{dep}`")
+        lines.append(f"- Label selector: `{label}`")
+        if app_id == "nginx":
+            lines.append("- **Not** `app=nginx` — that label does not exist in this cluster")
+        if pod_name:
+            lines.append(f"- Current pod: `{pod_name}` · `{detail.get('line', '')}`")
+        if injected:
+            lines.append(
+                "- Active chaos: "
+                + ", ".join(failure_mode_label(m) for m in injected)
+            )
+        lines.append("")
+        lines.append("```bash")
+        lines.append(f"kubectl get pods -n {ns} -l {label}")
+        if pod_name:
+            lines.append(f"kubectl describe pod {pod_name} -n {ns}")
+        else:
+            lines.append(f"POD=$(kubectl get pods -n {ns} -l {label} -o jsonpath='{{.items[0].metadata.name}}')")
+            lines.append(f"kubectl describe pod \"$POD\" -n {ns}")
+        lines.append(f"kubectl describe deployment {dep} -n {ns}")
+        lines.append(f"kubectl get events -n {ns} --sort-by=.lastTimestamp | tail -25")
+        lines.append("```")
+        lines.append("")
+
+    lines.append("**Scheduling / taint / affinity failures (Pending pods):**")
+    lines.append("```bash")
+    lines.append("kubectl get nodes -o custom-columns=NAME:.metadata.name,TAINTS:.spec.taints")
+    lines.append("```")
+    lines.append("\nIn **describe pod** → scroll to **Events** for `FailedScheduling`, `FailedMount`, etc.")
+    return "\n".join(lines)
+
+
 def _is_bad_image_outage(ctx: dict) -> bool:
     image = (ctx.get("image") or "").lower()
     reason = (ctx.get("pod_reason") or "").lower()
@@ -3771,70 +5453,37 @@ def _is_bad_image_outage(ctx: dict) -> bool:
     )
 
 
-def _manual_fix_steps_reply(ctx: dict, tree: dict, lang: str = "en") -> str:
+def _manual_fix_steps_reply(
+    ctx: dict,
+    tree: dict,
+    lang: str = "en",
+    history: list | None = None,
+    target: str | None = None,
+) -> str:
     """Exact kubectl / Argo steps — what Auto-fix runs under the hood."""
-    ns = cfg.NAMESPACE
-    dep = cfg.DEPLOYMENT_NAME
-    ctr = cfg.CONTAINER_NAME
-    good = cfg.GOOD_IMAGE
-    bad = ctx.get("image") or "unknown"
-    label = cfg.POD_LABEL
-    argo_app = cfg.ARGOCD_APP
-    argo_ns = cfg.ARGOCD_NAMESPACE
-
-    k8s_block = (
-        f"kubectl set image deployment/{dep} {ctr}={good} -n {ns}\n"
-        f"kubectl scale deployment/{dep} -n {ns} --replicas=1\n"
-        f"kubectl rollout status deployment/{dep} -n {ns}\n"
-        f"kubectl get pods -n {ns} -l {label}"
-    )
-
-    if not _is_bad_image_outage(ctx):
-        if lang == "hi":
-            return "**मैन्युअल फिक्स** इस स्थिति पर निर्भर करता है — पहले पूछें *what broke?*"
-        if lang == "fr":
-            return "**Correction manuelle :** décrivez le symptôme ou demandez *what broke?*"
-        return (
-            "**Manual fix** depends on the failure mode. Ask *what broke?* first, "
-            "then I can give exact `kubectl` commands."
-        )
-
-    if lang == "hi":
-        return (
-            f"**मैन्युअल समाधान (kubectl)**\n\n"
-            f"**समस्या:** इमेज `{bad}` pull नहीं हो रही → `ImagePullBackOff`.\n\n"
-            f"**चरण (Cloud Shell या जहाँ kubectl है):**\n"
-            f"```bash\n{k8s_block}\n```\n\n"
-            f"**Argo CD:** ऐप `{argo_app}` Git से sync करें, या live manifest फिर से बदल देगा:\n"
-            f"```bash\nkubectl patch application {argo_app} -n {argo_ns} "
-            f"--type merge -p '{{\"metadata\":{{\"annotations\":{{\"argocd.argoproj.io/refresh\":\"hard\"}}}}}}'\n"
-            f"```\n\n"
-            "*Guided demo → Auto-fix यही kubectl चलाता है — मैन्युअल के लिए ऊपर के commands कॉपी करें।*"
-        )
-
-    if lang == "fr":
-        return (
-            f"**Correction manuelle (kubectl)**\n\n"
-            f"**Problème :** l'image `{bad}` est introuvable → `ImagePullBackOff`.\n\n"
-            f"**Commandes (Cloud Shell) :**\n"
-            f"```bash\n{k8s_block}\n```\n\n"
-            f"**Argo CD :** si GitOps réécrit le manifest, resynchronisez `{argo_app}` ou utilisez Auto-fix.\n\n"
-            "*La démo guidée → Auto-fix exécute ces mêmes commandes pour vous.*"
-        )
-
-    return (
-        f"**Manual fix (kubectl)**\n\n"
-        f"**What broke:** Image `{bad}` does not exist in OCIR → pod stuck in `ImagePullBackOff`.\n\n"
-        f"**Run these in OCI Cloud Shell** (same commands Auto-fix runs):\n\n"
-        f"```bash\n{k8s_block}\n```\n\n"
-        f"**Why this works:** `kubectl set image` points the deployment at the known-good tag "
-        f"`{good.split('/')[-1]}`. Scale + rollout status waits until the pod is `1/1 Running`.\n\n"
-        f"**If Argo CD reverts you:** Git still has the good image — refresh/sync app `{argo_app}` "
-        f"in namespace `{argo_ns}`, or use **Guided demo → Auto-fix** (does kubectl + Argo for you).\n\n"
-        f"**Verify image on deployment:**\n"
-        f"```bash\nkubectl get deployment {dep} -n {ns} "
-        f"-o jsonpath='{{.spec.template.spec.containers[0].image}}'\n```"
-    )
+    resolved = target or "fastapi"
+    reply = _manual_fix_commands_reply(resolved, history, lang)
+    if "**No active outage detected**" in reply:
+        # Legacy fastapi-only ImagePullBackOff hint when ctx has bad image
+        if _is_bad_image_outage(ctx):
+            ns = cfg.NAMESPACE
+            dep = cfg.DEPLOYMENT_NAME
+            ctr = cfg.CONTAINER_NAME
+            good = cfg.GOOD_IMAGE
+            bad = ctx.get("image") or "unknown"
+            label = cfg.POD_LABEL
+            k8s_block = (
+                f"kubectl set image deployment/{dep} {ctr}={good} -n {ns}\n"
+                f"kubectl scale deployment/{dep} -n {ns} --replicas=1\n"
+                f"kubectl rollout status deployment/{dep} -n {ns}\n"
+                f"kubectl get pods -n {ns} -l {label}"
+            )
+            return (
+                f"**Manual fix (kubectl)**\n\n"
+                f"**What broke:** Image `{bad}` does not exist → `ImagePullBackOff`.\n\n"
+                f"```bash\n{k8s_block}\n```"
+            )
+    return reply
 
 
 def _demo_fix_steps_reply(ctx: dict, tree: dict, lang: str = "en") -> str:
@@ -4074,6 +5723,12 @@ def _hindi_simple_explain(ctx: dict, simple: str) -> str:
 
 def _is_fix_question(message: str) -> bool:
     q = _normalize_query(message)
+    if _wants_layman_explain(message) or _is_root_cause_question(message):
+        if not re.search(
+            r"\b(how to fix|how do i fix|how can i fix|fix this|fix it|remediat|resolve)\b",
+            q,
+        ):
+            return False
     return any(w in q for w in ("how", "fix", "correct", "remedy", "resolve", "repair"))
 
 
@@ -4140,8 +5795,11 @@ def _pick_degraded_fallback(
     if _wants_history_recap(message, history):
         return preamble + _history_recap_reply(history or [], ctx, tree, lang)
     if _is_fix_question(message):
+        if _wants_manual_fix_commands(message):
+            target = _resolve_app_target(message, history) or _infer_target_from_history(history) or "all"
+            return preamble + _manual_fix_commands_reply(target, history, lang)
         if _wants_manual_fix(message):
-            return preamble + _manual_fix_steps_reply(ctx, tree, lang)
+            return preamble + _manual_fix_steps_reply(ctx, tree, lang, history=history)
         return preamble + _demo_fix_steps_reply(ctx, tree, lang)
     if _wants_layman_explain(message) or "explain" in _intent_query(message):
         return preamble + _demo_rca_fallback_reply(ctx, tree, lang)
@@ -4182,12 +5840,33 @@ def _holmes_gemini_reply(
     }.get(lang, "Reply in clear plain English.")
     history_block = _format_history_block(history)
     fix_note = ""
-    if _wants_manual_fix(message):
+    if _wants_kubectl_check_commands(message):
+        fix_note = (
+            "User wants kubectl CHECK commands for Cloud Shell. "
+            "Nginx: deployment nginx-demo, label app=nginx-demo (NOT app=nginx, NOT deployment nginx). "
+            "FastAPI: deployment fastapi, label app=fastapi. "
+            "Never use angle brackets like <nginx-pod-name>. "
+            "Give POD=$(kubectl get pods -l SELECTOR ...) or use pod name from facts.\n"
+        )
+    elif _wants_manual_fix_commands(message):
+        fix_note = (
+            "User wants MANUAL kubectl FIX commands for Cloud Shell. "
+            "Nginx: deployment nginx-demo, label app=nginx-demo. "
+            "FastAPI: deployment fastapi, label app=fastapi. "
+            "Give mode-specific undo + delete deployment + apply -k deploy/k8s/staging-heal "
+            "or apply -f deploy/k8s/staging-nginx. Never use app=nginx or <pod-name>.\n"
+        )
+    elif _wants_manual_fix(message):
         fix_note = (
             f"User wants a MANUAL fix via kubectl/terminal — give copy-paste bash commands: "
             f"`kubectl set image deployment/{cfg.DEPLOYMENT_NAME} {cfg.CONTAINER_NAME}={cfg.GOOD_IMAGE} "
             f"-n {cfg.NAMESPACE}`, scale, rollout status, get pods. "
             "Do NOT tell them to use Guided demo Step 4 or Auto-fix unless as optional footnote.\n"
+        )
+    elif _wants_layman_explain(message) or _is_root_cause_question(message):
+        fix_note = (
+            "User wants ROOT CAUSE explanation in plain language — explain what broke and why. "
+            "Do NOT give kubectl fix commands unless they explicitly ask how to fix.\n"
         )
     elif _is_fix_question(message):
         fix_note = (
@@ -4221,7 +5900,12 @@ def _holmes_gemini_reply(
     return _run_holmes_cli_prompt(prompt, max_steps=chat_steps)
 
 
-def _try_holmes_fast_answer(message: str, ctx: dict, tree: dict) -> str | None:
+def _try_holmes_fast_answer(
+    message: str,
+    ctx: dict,
+    tree: dict,
+    history: list[dict] | None = None,
+) -> str | None:
     """Instant accurate answers from live kubectl — no LLM latency."""
     lang = _requested_language(message)
     q = _normalize_query(message)
@@ -4248,6 +5932,18 @@ def _try_holmes_fast_answer(message: str, ctx: dict, tree: dict) -> str | None:
 
     if _is_pod_details_telemetry(q):
         return _format_pod_details_reply(ctx, tree, lang)
+
+    if _wants_inject_commands_explanation(message):
+        target = _resolve_app_target(message, history) or _infer_target_from_history(history) or "all"
+        return _inject_commands_reply(target, history)
+
+    if _wants_manual_fix_commands(message):
+        target = _resolve_app_target(message, history) or _infer_target_from_history(history) or "all"
+        return _manual_fix_commands_reply(target, history, lang)
+
+    if _wants_kubectl_check_commands(message):
+        target = _resolve_app_target(message, history) or _infer_target_from_history(history)
+        return _kubectl_diagnostic_reply(target, message, history)
 
     if _is_status_telemetry(q) or re.search(
         r"^(is my app healthy|is the app healthy|app healthy)\??$", q
@@ -4307,14 +6003,17 @@ def holmes_chat(
     message: str,
     on_step: StepCallback = None,
     history: list[dict] | None = None,
+    mode: str | None = None,
 ) -> dict:
     """Free-form HolmesGPT Q&A — separate from the guided demo Step 3."""
+    from agent_tools import effective_chat_mode, gemini_agent_chat, should_use_demo_fast_path
+
     global _last_gemini_failure
     _last_gemini_failure = None
     text = (message or "").strip()
     if not text:
         raise ValueError("Message is required")
-    ok_cluster, cluster_msg = _cluster_reachable()
+    ok_cluster, cluster_msg = _cluster_api_ok()
     if not ok_cluster:
         raise RuntimeError(cluster_msg)
 
@@ -4340,7 +6039,135 @@ def holmes_chat(
             **extra,
         }
 
+    chat_mode = effective_chat_mode(mode)
+    use_demo = should_use_demo_fast_path(text, history, mode)
+
+    if _is_greeting(text):
+        rows = _apps_status_data()
+        step("Answer ready", "Cluster greeting", "done")
+        return result(
+            _cluster_greeting_reply(text),
+            "action",
+            ui="status_cards",
+            apps_status=rows,
+            links=resolved_public_app_links(),
+        )
+
+    if _is_dangerous_operation(text):
+        step("Answer ready", "Blocked destructive request", "done")
+        return result(_dangerous_operation_reply(), "action")
+
+    if _has_conflicting_instructions(text):
+        step("Answer ready", "Conflicting instructions", "done")
+        return result(_conflicting_instructions_reply(), "action")
+
+    impossible_dest = _impossible_deploy_destination(text)
+    if impossible_dest:
+        step("Answer ready", "Unsupported deploy target", "done")
+        return result(_impossible_deploy_reply(impossible_dest), "action")
+
+    unsupported = _unsupported_workload_token(text)
+    if unsupported:
+        step("Answer ready", "Unsupported workload", "done")
+        return result(_unsupported_workload_reply(unsupported), "action")
+
+    info_reply = _try_curated_info_reply(text)
+    if info_reply:
+        step("Answer ready", "Cluster info", "done")
+        return result(info_reply, "telemetry")
+
+    diag_target = _resolve_app_target(text, history) or _infer_target_from_history(history)
+    scoped_diag = _try_scoped_diagnosis_reply(text, history)
+    if scoped_diag and diag_target and diag_target != "all":
+        step("Answer ready", f"Diagnosis for {cfg.demo_app(diag_target)['label']}", "done")
+        return result(
+            scoped_diag,
+            "telemetry",
+            apps_status=_scoped_apps_status(_apps_status_data(), diag_target),
+            links={diag_target: _app_browser_links(diag_target)},
+        )
+
+    catalog = _try_failure_catalog_reply(text)
+    if catalog:
+        reply, catalog_data = catalog
+        step("Answer ready", "Failure mode catalog", "done")
+        return result(reply, "telemetry", ui="failure_catalog", failure_catalog=catalog_data)
+
+    act_early, target_early = _classify_chat_action(text, history)
+    if act_early == "status":
+        target_early = _resolve_action_target(act_early, text, history, target_early) or "all"
+        rows = _apps_status_data() if target_early == "all" else [
+            r for r in _apps_status_data() if r["id"] == target_early
+        ]
+        step("Answer ready", "Live cluster status", "done")
+        return result(
+            _format_apps_status_reply() if target_early == "all" else _execute_chat_action(
+                "app_status", target_early, on_step, message=text, history=history,
+            )["message"],
+            "action",
+            ui="status_cards",
+            apps_status=rows,
+            links=resolved_public_app_links(),
+        )
+
     if cfg.CHAT_ACTIONS_ENABLED:
+        compound = _try_compound_deploy_break(text)
+        if compound:
+            deploy_t, break_t = compound
+            d_res = _execute_chat_action(
+                "deploy", deploy_t, on_step, message=text, history=history,
+            )
+            o_res = _execute_chat_action(
+                "outage", break_t, on_step, message=text, history=history,
+            )
+            step("Done", "deploy+break", "done")
+            return result(
+                d_res["message"] + "\n\n---\n\n" + o_res["message"],
+                "action",
+                action="compound",
+                action_target=break_t,
+                apps_status=_scoped_apps_status(o_res.get("apps_status"), break_t),
+                inject_summary=o_res.get("inject_summary"),
+                links=resolved_public_app_links(),
+            )
+
+    # Curated kubectl — never let the LLM invent app=nginx or <pod-name> placeholders.
+    if _wants_inject_commands_explanation(text):
+        target = _resolve_app_target(text, history) or _infer_target_from_history(history) or "all"
+        step("Answer ready", "Injection kubectl commands", "done")
+        return result(_inject_commands_reply(target, history), "telemetry")
+
+    if _wants_manual_fix_commands(text):
+        target = _resolve_app_target(text, history) or _infer_target_from_history(history) or "all"
+        lang = _resolved_language(text, history)
+        step("Answer ready", "Manual fix kubectl commands", "done")
+        return result(_manual_fix_commands_reply(target, history, lang), "telemetry")
+
+    if _wants_kubectl_check_commands(text):
+        target = _resolve_app_target(text, history) or _infer_target_from_history(history)
+        step("Answer ready", "Cloud Shell kubectl commands", "done")
+        return result(_kubectl_diagnostic_reply(target, text, history), "telemetry")
+
+    # Engineer / hybrid agent path (Gemini + tools — like Claude Desktop + MCP)
+    if chat_mode in ("agent", "hybrid") and not use_demo and _gemini_key_configured():
+        ctx_pre = _incident_context()
+        tree_pre = _argocd_app_tree(ctx_pre)
+        facts = _holmes_cluster_facts(ctx_pre, tree_pre)
+        agent_ok, agent_reply = gemini_agent_chat(
+            text, facts, history=history, on_step=on_step,
+        )
+        if agent_ok and agent_reply.strip():
+            rows = _apps_status_data()
+            return result(
+                agent_reply,
+                "agent",
+                chat_mode=chat_mode,
+                apps_status=rows,
+                ui="status_cards",
+                links=resolved_public_app_links(),
+            )
+
+    if cfg.CHAT_ACTIONS_ENABLED and use_demo:
         if _is_greeting(text):
             rows = _apps_status_data()
             return result(
@@ -4354,19 +6181,32 @@ def holmes_chat(
             reply, choices = _status_disambiguation_reply()
             return result(reply, "action", ui="choices", choices=choices)
         act_type, target = _classify_chat_action(text, history)
+        target = _resolve_action_target(act_type, text, history, target)
+        if act_type == "outage" and _wants_repeat_same_outage(text) and not target:
+            hist_target, _ = _last_failure_injection_from_history(history)
+            if hist_target:
+                target = hist_target
         if act_type in ("deploy", "reset", "outage", "heal", "explain") and target is None:
-            reply, choices = _action_target_disambiguation(act_type)
+            reply, choices = _action_target_disambiguation(act_type, text)
             return result(reply, "action", ui="choices", choices=choices)
         if act_type != "chat":
             try:
-                act = _execute_chat_action(act_type, target, on_step, message=text)
+                act = _execute_chat_action(
+                    act_type, target, on_step, message=text, history=history,
+                )
                 step("Done", act_type, "done")
+                act_target = act.get("target")
                 return result(
                     act["message"],
                     "action",
                     action=act.get("action"),
-                    action_target=act.get("target"),
-                    apps_status=act.get("apps_status"),
+                    action_target=act_target,
+                    apps_status=(
+                        None if act.get("inject_summary")
+                        else _scoped_apps_status(act.get("apps_status"), act_target)
+                    ),
+                    heal_summary=act.get("heal_summary"),
+                    inject_summary=act.get("inject_summary"),
                     ui=act.get("ui"),
                     choices=act.get("choices"),
                     links=act.get("links"),
@@ -4389,12 +6229,22 @@ def holmes_chat(
 
     step("Checking telemetry", "Argo CD + pod status", "cluster")
 
+    if _is_fix_question(text) and _wants_manual_fix_commands(text):
+        target = _resolve_app_target(text, history) or _infer_target_from_history(history) or "all"
+        step("Answer ready", "Manual kubectl fix steps", "done")
+        return result(_manual_fix_commands_reply(target, history, lang), "telemetry")
+
     if _is_fix_question(text) and _wants_manual_fix(text):
         step("Answer ready", "Manual kubectl steps", "done")
-        return result(_manual_fix_steps_reply(ctx, tree, lang), "telemetry")
+        return result(_manual_fix_steps_reply(ctx, tree, lang, history=history), "telemetry")
+
+    if _wants_kubectl_check_commands(text):
+        target = _resolve_app_target(text, history) or _infer_target_from_history(history)
+        step("Answer ready", "Cloud Shell kubectl commands", "done")
+        return result(_kubectl_diagnostic_reply(target, text, history), "telemetry")
 
     if _is_telemetry_only_intent(text):
-        fast = _try_holmes_fast_answer(text, ctx, tree)
+        fast = _try_holmes_fast_answer(text, ctx, tree, history)
         if fast:
             step("Answer ready", "Live cluster telemetry (instant)", "done")
             return result(fast, "telemetry")
@@ -4744,76 +6594,43 @@ def _explain_with_ai_impl() -> dict:
     }
 
 
-def auto_fix(on_step: StepCallback = None) -> dict:
-    return _with_step_stream(on_step, _auto_fix_impl)
+def auto_fix(on_step: StepCallback = None, *, fast: bool = False) -> dict:
+    return _with_step_stream(on_step, lambda: _auto_fix_impl(fast=fast))
 
 
-def _auto_fix_impl() -> dict:
+def _auto_fix_impl(*, fast: bool = False) -> dict:
     ok, cluster_msg = _cluster_reachable()
     if not ok:
         raise RuntimeError(cluster_msg)
 
+    app = cfg.demo_app("fastapi")
     timeline: list[dict[str, str]] = []
     _timeline_step(timeline, "Starting GitOps recovery", "AI explained only — this step applies the fix")
     argo_note = ""
     heal_error: Exception | None = None
-    try:
-        staging = cfg.STAGING_APP_PATH
-        if cfg.DEPLOY_TARGET != "oci" and staging.exists():
-            _timeline_step(timeline, "Applying staging manifests", str(staging))
-            code, apply_out = _run(_kubectl_cmd("apply", "-f", str(staging)), timeout=60)
-            if code != 0:
-                _kubectl(
-                    "delete", "deployment", cfg.DEPLOYMENT_NAME, "-n", cfg.NAMESPACE,
-                    "--ignore-not-found",
-                )
-                code, apply_out = _run(_kubectl_cmd("apply", "-f", str(staging)), timeout=60)
-            if code != 0:
-                raise RuntimeError(f"Apply staging app failed: {apply_out}")
 
-        _timeline_step(timeline, "Scaling deployment to 1 replica", cfg.NAMESPACE)
-        _kubectl_must(
-            "scale", f"deployment/{cfg.DEPLOYMENT_NAME}",
-            "-n", cfg.NAMESPACE, "--replicas=1",
-            action="Scale staging app up",
-        )
-        _timeline_step(timeline, "Restoring known-good container image", cfg.GOOD_IMAGE)
-        _clear_crash_override()
-        _kubectl_must(
-            "set", "image",
-            f"deployment/{cfg.DEPLOYMENT_NAME}",
-            f"{cfg.CONTAINER_NAME}={cfg.GOOD_IMAGE}",
-            "-n", cfg.NAMESPACE,
-            action="Restore good image",
-        )
-        _kubectl("delete", "pods", "-n", cfg.NAMESPACE, "-l", cfg.POD_LABEL, "--wait=false")
-        _wait_rollout_with_steps(
-            timeline,
-            timeout=90,
-            title="Waiting for rollout to complete",
-        )
+    try:
+        ready = _heal_deployment_for_app(app, timeline, fast=fast)
+        if not ready:
+            _timeline_step(
+                timeline,
+                "Pod still starting",
+                _pod_troubleshoot(),
+                phase="k8s",
+                pause=False,
+            )
     except Exception as e:
         heal_error = e
-    finally:
-        _timeline_step(timeline, "Re-enabling ArgoCD auto-sync", "GitOps policy restored from manifest")
-        restore_code, restore_out = _argocd_restore_gitops_policy()
-        if restore_code != 0:
-            argo_note += f" (ArgoCD restore skipped: {(restore_out or '')[:100]})"
-        _argocd_refresh()
-        _timeline_step(timeline, "Triggering ArgoCD sync", "Cluster state → Git → Healthy")
-        sync_code, sync_out = _argocd_trigger_sync()
-        if sync_code != 0:
-            argo_note += f" (ArgoCD sync skipped: {(sync_out or '')[:80]})"
-        else:
-            argo = _argocd_wait_synced(timeout=90)
-            if not argo.startswith("Synced/"):
-                argo_note += " (GitOps still reconciling — refresh ArgoCD in ~30s)"
 
-    if heal_error is not None:
-        raise heal_error
+    argo_note = _argocd_finalize_heal(app, timeline, fast=fast)
+
+    if heal_error is not None and not _pod_running_ready():
+        if not fast:
+            raise heal_error
+        argo_note += f" ({heal_error})"
 
     _ensure_port_forward()
-    _timeline_step(timeline, "Verifying health endpoint", cfg.APP_HEALTH_CHECK_URL, pause=True)
+    _timeline_step(timeline, "Verifying health endpoint", cfg.APP_HEALTH_CHECK_URL, pause=not fast)
     code, argo = _kubectl(
         "get", "application", cfg.ARGOCD_APP, "-n", cfg.ARGOCD_NAMESPACE,
         "-o", "jsonpath={.status.sync.status}/{.status.health.status}",
@@ -4827,10 +6644,18 @@ def _auto_fix_impl() -> dict:
     except Exception:
         links = {}
     recovered = _pod_running_ready() and health != "unreachable"
+    summary = _format_heal_app_summary(
+        "fastapi",
+        {
+            "healthy": recovered,
+            "app_reachable": recovered,
+            "heal_error": str(heal_error) if heal_error else "",
+        },
+    )
     _timeline_step(
         timeline,
         "Recovery complete" if recovered else "Recovery applied — verify status",
-        "App and GitOps should be green again" if recovered else _pod_troubleshoot(),
+        summary["pod_line"],
         pause=False,
     )
     return {
@@ -4840,8 +6665,6 @@ def _auto_fix_impl() -> dict:
         "app_reachable": recovered,
         "open_url": links.get("app_dashboard") or links.get("app_health", cfg.PUBLIC_APP_HEALTH_URL),
         "staging_url": links.get("app_dashboard"),
-        "message": (
-            ("App recovered — health check passed. Demo complete." if recovered else f"Heal applied — {_pod_troubleshoot()}")
-            + argo_note
-        ),
+        "message": _format_heal_all_message([summary]) + argo_note,
+        "heal_summary": [summary],
     }

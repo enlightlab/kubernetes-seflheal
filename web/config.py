@@ -34,12 +34,12 @@ CONTAINER_NAME = _env("CONTAINER_NAME", "api")
 POD_LABEL = _env("POD_LABEL", "app=fastapi")
 
 _default_bad = (
-    "bom.ocir.io/bmitpaosivqx/enlight-fastapi:DOES-NOT-EXIST"
+    "kirtiprasad2003/enlight-fastapi:DOES-NOT-EXIST"
     if DEPLOY_TARGET == "oci"
     else "enlight-fastapi:DOES-NOT-EXIST"
 )
 _default_good = (
-    "bom.ocir.io/bmitpaosivqx/enlight-fastapi:demo-pass"
+    "kirtiprasad2003/enlight-fastapi:demo-pass"
     if DEPLOY_TARGET == "oci"
     else "enlight-fastapi:demo-pass"
 )
@@ -96,6 +96,10 @@ STAGING_NGINX_PATH = Path(_env("STAGING_NGINX_PATH", str(ROOT / "deploy" / "k8s"
 
 # Chat can run deploy / outage / heal without the guided demo wizard.
 CHAT_ACTIONS_ENABLED = _flag("CHAT_ACTIONS_ENABLED", True)
+# When regex cannot resolve a workload, ask Gemini before showing disambiguation buttons.
+CHAT_LLM_TARGET = _flag("CHAT_LLM_TARGET", True)
+# demo = fast curated actions only | agent = Gemini tools (Claude Desktop style) | hybrid = both
+CHAT_MODE = _env("CHAT_MODE", "agent").strip().lower()
 
 K8SGPT_BIN = _env("K8SGPT_BIN", "k8sgpt")
 K8SGPT_TIMEOUT = int(_env("K8SGPT_TIMEOUT", "90"))
@@ -330,6 +334,7 @@ def runtime_info() -> dict[str, str | bool]:
         "holmes_model": resolved_holmes_model() if HOLMES_ENABLED else HOLMES_MODEL,
         "holmes_http_url": HOLMES_HTTP_URL,
         "chat_actions_enabled": CHAT_ACTIONS_ENABLED,
+        "chat_mode": CHAT_MODE,
         "demo_apps": list(demo_apps().keys()),
         **demo_credentials(),
     }

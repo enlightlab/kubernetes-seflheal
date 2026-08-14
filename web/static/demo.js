@@ -74,7 +74,8 @@
   let runningStepNum = 0;
   let demoInProgress = false;
   let statusFailCount = 0;
-  let autoDeployAttempted = false;
+  let autoDeployAttempted = { fastapi: false, nginx: false };
+  let autoAdvancedDeploy = { fastapi: false, nginx: false };
   let autoDeployEnabled = true;
   let resetMode = false;
 
@@ -154,11 +155,16 @@
 
   function switchDemoApp(appId) {
     if (!APP_CONFIG[appId] || appId === selectedDemoApp) return;
+    if (busy || demoInProgress) {
+      log(`Finish the current ${currentApp().label} step before switching apps`, 'warn');
+      return;
+    }
     selectedDemoApp = appId;
     wizardStep = loadWizardStep();
     updateAppChrome();
     hideExplainReport();
     statusFailCount = 0;
+    setWizardStep(wizardStep);
     refreshStatus();
   }
 
@@ -300,7 +306,10 @@
     const btnContinue = document.getElementById('btnContinue');
     const wiz1Desc = document.getElementById('wiz1Desc');
 
-    if (wizardStep === 1 && !busy && !demoInProgress && deployed && !(resetLockUntil && Date.now() < resetLockUntil)) {
+    if (wizardStep === 1 && !busy && !demoInProgress && deployed
+        && !autoAdvancedDeploy[selectedDemoApp]
+        && !(resetLockUntil && Date.now() < resetLockUntil)) {
+      autoAdvancedDeploy[selectedDemoApp] = true;
       setWizardStep(2);
       activatePhase('health', 'done');
     }
@@ -333,6 +342,10 @@
       if (wiz1Desc) wiz1Desc.textContent = `Registers ${app.argocdName} in Argo CD and syncs from Git.`;
       const clean = isClean(d);
       const outage = !clean && (d.workloads_exist || d.argocd_app_exists) && !deployed;
+      if (outage && wizardStep >= 5) {
+        // Heal finished — status poll may lag behind; keep the recovery outcome visible.
+        return;
+      }
       if (outage && wizardStep >= 3 && !(resetLockUntil && Date.now() < resetLockUntil)) {
         if (btnDeploy) btnDeploy.hidden = true;
       } else if (clean || (resetLockUntil && Date.now() < resetLockUntil)) {
@@ -547,14 +560,15 @@
   }
 
   async function maybeAutoDeploy(d) {
-    if (autoDeployAttempted || busy || demoInProgress) return;
+    const appId = selectedDemoApp;
+    if (autoDeployAttempted[appId] || busy || demoInProgress) return;
     if (isDeployed(d) || d.cluster !== 'ok') return;
     if (!autoDeployEnabled) return;
     if (new URLSearchParams(location.search).get('auto_deploy') === '0') return;
     if (!isClean(d)) return;
 
-    autoDeployAttempted = true;
-    log('Auto-deploy: clean slate — running Step 1', 'info');
+    autoDeployAttempted[appId] = true;
+    log(`Auto-deploy: clean slate for ${currentApp().label} — running Step 1`, 'info');
     opsTitle.textContent = `Auto-deploying ${currentApp().label}…`;
     opsDetail.textContent = 'Registering Argo CD app and syncing from Git';
     await onDeploy();
@@ -720,7 +734,7 @@
 
   async function onReset() {
     try {
-      autoDeployAttempted = true;
+      autoDeployAttempted[selectedDemoApp] = true;
       resetLockUntil = Date.now() + 15000;
       const banner = document.getElementById('demoAlreadyLive');
       if (banner) banner.hidden = true;
@@ -730,6 +744,7 @@
       demoInProgress = false;
       const clean = !!(d.app_clean ?? d.staging_clean);
       clearWizardStep();
+      autoAdvancedDeploy[selectedDemoApp] = false;
       setWizardStep(1);
       showResult(d.message, clean ? 'warn' : 'err');
       resetTheater();
@@ -758,7 +773,7 @@
     try {
       const d = await streamAction(appStreamUrl('outage'), 'Simulate outage', 2);
       if (!d) return;
-      autoDeployAttempted = true;
+      autoDeployAttempted[selectedDemoApp] = true;
       showResult(d.message, 'err');
       activatePhase('break', 'break');
       setOpenLink(d.staging_url || d.open_url);
@@ -786,7 +801,7 @@
       showResult(d.message, d.app_reachable ? 'ok' : 'err');
       activatePhase('health', 'done');
       setOpenLink(d.staging_url || d.open_url);
-      setWizardStep(5);
+      setWizardStep(d.app_reachable ? 5 : 4);
       await refreshStatus();
     } catch (e) { showResult(e.message, 'err'); setBusy(false); }
   }

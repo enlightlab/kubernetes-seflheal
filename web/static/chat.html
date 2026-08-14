@@ -3,107 +3,110 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Cluster Command Deck — Enlight Lab</title>
-  <!-- ui-build: agent-v25 -->
+  <title>Enlight Lab — Cluster Self-Heal</title>
+  <!-- ui-build: agent-v84 -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/styles.css?v=25" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/ccd.css?v=84" />
 </head>
-<body class="holmes-body ccd-page" id="holmes-app">
-  <div class="ccd-glow" aria-hidden="true"></div>
+<body>
+  <div class="el-page" id="holmes-app">
+    <header class="el-topbar">
+      <a href="/" class="el-brand-block" aria-label="Enlight Lab home">
+        <img src="/static/assets/enlight-lab-logo.png" alt="Enlight Lab" class="el-brand-logo-img" />
+        <span class="el-brand-sub">CLUSTER SELF-HEAL AGENT</span>
+      </a>
+    </header>
 
-  <header class="ccd-header">
-    <div class="ccd-brand">
-      <span class="ccd-logo">{"{-}"}</span>
-      <div>
-        <strong class="ccd-brand-title">Cluster Command Deck</strong>
-        <span class="ccd-brand-sub">AI KUBERNETES ASSISTANT</span>
+    <!-- State 1: Hero (before first message) -->
+    <div id="el-hero-state">
+      <div class="el-hero-wrap">
+        <div class="el-hero-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none">
+            <path d="M4 4h16v12H8l-4 4V4z" fill="#2f5fe0"/>
+          </svg>
+        </div>
+        <h1 class="el-hero-title">Control your cluster in plain English.</h1>
+        <p class="el-hero-subtitle">
+          Deploy, break, diagnose, and fix FastAPI and Nginx on staging.
+          Say it in chat — no kubectl cheat sheet required.
+        </p>
+      </div>
+
+      <div class="el-chat-wrap el-chat-wrap--landing">
+        <div id="el-compose-slot-landing"></div>
+        <div class="el-quick-row">
+          <button type="button" class="el-quick-btn" id="client-demo-btn-hero">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M20 6L9 17l-5-5" stroke="#0f1729" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Run client demo
+          </button>
+        </div>
+      </div>
+
+      <div class="el-scroll-row">
+        <a href="/static/home.html" class="el-scroll-btn">
+          <span class="el-scroll-dot"></span>
+          Scroll to learn more
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M6 9l6 6 6-6" stroke="#0f1729" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </a>
       </div>
     </div>
-    <nav class="ccd-nav">
-      <a href="/">Home</a>
-      <a href="/demo">Guided demo</a>
-      <span id="holmes-status" class="ccd-status-pill">Ready</span>
-      <span id="gemini-chip" class="holmes-gemini-chip" hidden></span>
-    </nav>
-  </header>
 
-  <main class="ccd-main">
-    <!-- Landing state -->
-    <section id="ccd-landing" class="ccd-landing">
-      <div class="ccd-landing-icon" aria-hidden="true">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" stroke="#2563EB" stroke-width="1.8" stroke-linejoin="round"/>
-          <path d="M8 10h8M8 14h5" stroke="#2563EB" stroke-width="1.8" stroke-linecap="round"/>
-        </svg>
+    <!-- State 2: Chat card (after first message) -->
+    <div id="el-chat-state" hidden>
+      <div class="el-chat-wrap">
+        <div class="el-chat-card">
+          <div class="el-cluster-row">
+            <button type="button" class="el-cluster-badge" id="cluster-status-btn" title="Tap for live pod status">
+              <span class="el-cluster-dot" id="cluster-dot"></span>
+              <span id="cluster-strip-text">enlight-staging · loading…</span>
+            </button>
+          </div>
+          <div id="holmes-messages-pane" class="el-messages">
+            <div id="holmes-messages" role="log" aria-live="polite"></div>
+          </div>
+          <div id="el-compose-slot-chat"></div>
+        </div>
+        <div class="el-quick-row" id="el-chat-quick-row">
+          <button type="button" class="el-quick-btn" id="client-demo-btn-chat">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M20 6L9 17l-5-5" stroke="#0f1729" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Run client demo
+          </button>
+          <button type="button" class="el-quick-btn el-quick-btn--ghost" data-prompt="Show pod status for all workloads">
+            Pod status
+          </button>
+          <button type="button" class="el-quick-btn el-quick-btn--ghost" data-prompt="List all 40 failure modes">
+            40 failures
+          </button>
+          <button type="button" class="el-quick-btn el-quick-btn--ghost" data-prompt="Auto-fix any issues in the cluster">
+            Auto-fix
+          </button>
+        </div>
       </div>
-      <h1 class="ccd-landing-title">Control your cluster<br />in plain English.</h1>
-      <p class="ccd-landing-lead">Tell me what to check, simulate, or fix — I'll handle pods, deployments, errors, and rollbacks instantly.</p>
+    </div>
 
-      <form id="ccd-landing-form" class="ccd-input-standalone" autocomplete="off">
-        <input type="text" id="ccd-landing-input"
-          placeholder="e.g. simulate a crash loop on nginx, show pod logs…"
+    <!-- Shared compose (moved between landing slot and chat slot) -->
+    <template id="el-compose-template">
+      <form id="holmes-form" class="el-input-bar" autocomplete="off">
+        <input type="text" id="holmes-input" class="el-input" aria-label="Message"
+          placeholder="Ask anything, e.g. show pod status, simulate image pull on nginx..."
           autocomplete="off" />
-        <button type="submit" id="ccd-landing-send" class="ccd-send-btn" aria-label="Send" disabled>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+        <button type="submit" id="holmes-send" class="el-send-btn" aria-label="Send" disabled>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
+            <path d="M3 11L21 3L13 21L11 13L3 11Z" fill="currentColor"/>
           </svg>
         </button>
       </form>
+    </template>
+  </div>
 
-      <div class="ccd-pills" id="ccd-landing-pills">
-        <button type="button" class="ccd-pill" data-prompt="How many apps are deployed?">How many apps? ↗</button>
-        <button type="button" class="ccd-pill" data-prompt="Show pod status for all workloads">Pod status ↗</button>
-        <button type="button" class="ccd-pill ccd-pill--warn" data-prompt="Simulate an outage for nginx">Simulate outage ↗</button>
-        <button type="button" class="ccd-pill ccd-pill--hot" data-prompt="Auto-fix any issues in the cluster">Auto-fix ↗</button>
-      </div>
-    </section>
-
-    <!-- Chat state -->
-    <section id="ccd-chat" class="ccd-chat" hidden>
-      <div class="ccd-glass-card">
-        <div class="ccd-cluster-strip" id="ccd-cluster-strip">
-          <span class="ccd-cluster-dot" id="cluster-dot"></span>
-          <span id="cluster-strip-text">enlight-staging · loading…</span>
-        </div>
-
-        <div id="holmes-messages-pane" class="ccd-messages-pane">
-          <div id="holmes-messages" class="holmes-messages ccd-messages" role="log" aria-live="polite"></div>
-        </div>
-
-        <div id="holmes-activity" class="ccd-typing" hidden>
-          <span class="holmes-typing-dots"><span></span><span></span><span></span></span>
-          <span id="activity-text">Thinking through your request…</span>
-        </div>
-
-        <form id="holmes-form" class="ccd-input-inner" autocomplete="off">
-          <input type="text" id="holmes-input" name="message"
-            placeholder="Ask anything, e.g. simulate a crash on nginx…"
-            autocomplete="off" />
-          <button type="submit" id="holmes-send" class="ccd-send-btn ccd-send-btn--sm" aria-label="Send" disabled>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-              <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-            </svg>
-          </button>
-        </form>
-      </div>
-
-      <div class="ccd-pills ccd-pills--chat" id="ccd-chat-pills">
-        <button type="button" class="ccd-pill" data-prompt="How many apps are deployed?">How many apps? ↗</button>
-        <button type="button" class="ccd-pill" data-prompt="Show pod status for all workloads">Pod status ↗</button>
-        <button type="button" class="ccd-pill ccd-pill--warn" data-prompt="Simulate a crash loop on nginx">Simulate outage ↗</button>
-        <button type="button" class="ccd-pill ccd-pill--hot" data-prompt="Auto-fix any issues in the cluster">Auto-fix ↗</button>
-      </div>
-    </section>
-  </main>
-
-  <footer class="ccd-footer">
-    <a href="/">← Home</a> · <a href="/demo">Guided demo</a>
-    <span class="agent-ui-tag">UI v25</span>
-  </footer>
-
-  <script src="/static/holmes.js?v=25"></script>
+  <script src="/static/holmes.js?v=84"></script>
 </body>
 </html>

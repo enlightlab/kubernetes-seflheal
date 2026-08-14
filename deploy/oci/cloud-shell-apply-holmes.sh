@@ -30,10 +30,5 @@ if [ ! -f web/actions.py ] || [ ! -f deploy/oci/deploy-holmes-live.sh ]; then
   exit 1
 fi
 
-if [ -f apply-holmes.sh ]; then
-  exec bash apply-holmes.sh
-fi
-
-if [ -f deploy/oci/apply-holmes.sh ]; then
-  exec bash deploy/oci/apply-holmes.sh
-fi
+find deploy/oci -name '*.sh' -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+exec bash deploy/oci/deploy-holmes-live.sh

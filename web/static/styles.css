@@ -2076,23 +2076,40 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: .85rem 1.5rem;
+  padding: .85rem clamp(20px, 4vw, 64px);
   background: rgba(255, 255, 255, .9);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid #e8eef7;
+  width: 100%;
 }
 .readiness-logo {
   display: inline-flex;
-  align-items: center;
-  gap: .5rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
   text-decoration: none;
-  font-family: "Plus Jakarta Sans", Inter, sans-serif;
-  font-weight: 800;
-  font-size: 1.2rem;
-  color: #2557ff;
-  letter-spacing: -.02em;
+  background: transparent;
 }
-.readiness-logo img { display: block; }
+.readiness-logo-lockup {
+  display: block;
+  height: 40px;
+  width: auto;
+  max-width: none;
+  mix-blend-mode: multiply;
+}
+/* Same MVP under-line style as chat: starts at logo left, much smaller than name */
+.readiness-logo-sub {
+  display: block;
+  margin: 0;
+  padding: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #0f1729;
+  line-height: 1.1;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+}
 .readiness-nav {
   display: flex;
   align-items: center;
@@ -2117,9 +2134,10 @@ body {
 .readiness-status-pill--busy { color: #b45309; background: #fffbeb; }
 
 .readiness-page {
-  max-width: 960px;
+  width: 100%;
+  max-width: 1280px;
   margin: 0 auto;
-  padding: 0 1.25rem 3rem;
+  padding: 0 clamp(20px, 4vw, 48px) 3rem;
 }
 
 .readiness-hero {
@@ -2142,18 +2160,22 @@ body {
 .readiness-title {
   margin: 0 0 .85rem;
   font-family: "Plus Jakarta Sans", Inter, sans-serif;
-  font-size: clamp(2rem, 5.5vw, 3rem);
+  font-size: clamp(2.25rem, 4vw, 3.5rem);
   font-weight: 800;
   letter-spacing: -.035em;
   line-height: 1.1;
   color: #0f172a;
+  text-align: center;
 }
 .readiness-lead {
   margin: 0 auto 1.5rem;
-  max-width: 40rem;
-  font-size: 1.05rem;
-  line-height: 1.65;
+  max-width: 720px;
+  width: 100%;
+  font-size: 1.15rem;
+  line-height: 1.7;
   color: #64748b;
+  text-align: center;
+}
 }
 .readiness-lead strong { color: #334155; font-weight: 600; }
 
@@ -2192,8 +2214,8 @@ body {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: .75rem;
-  max-width: 36rem;
-  margin: 0 auto;
+  width: 100%;
+  margin: 0;
 }
 @media (max-width: 560px) { .readiness-stats { grid-template-columns: repeat(2, 1fr); } }
 .readiness-stat {
@@ -2231,7 +2253,7 @@ body {
 .readiness-section-title {
   margin: 0 0 .4rem;
   font-family: "Plus Jakarta Sans", Inter, sans-serif;
-  font-size: clamp(1.35rem, 3vw, 1.75rem);
+  font-size: 1.75rem;
   font-weight: 800;
   letter-spacing: -.02em;
   text-align: center;
@@ -2239,9 +2261,10 @@ body {
 }
 .readiness-section-sub {
   margin: 0 auto 1.5rem;
-  max-width: 32rem;
+  max-width: 640px;
+  width: 100%;
   text-align: center;
-  font-size: .92rem;
+  font-size: 1rem;
   line-height: 1.55;
   color: #64748b;
 }
@@ -2250,6 +2273,10 @@ body {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 1rem;
+  width: 100%;
+}
+@media (min-width: 1100px) {
+  .readiness-grid { grid-template-columns: repeat(4, 1fr); }
 }
 @media (max-width: 640px) { .readiness-grid { grid-template-columns: 1fr; } }
 .readiness-card {
@@ -2305,16 +2332,19 @@ body {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  max-width: 36rem;
-  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.25rem;
+  width: 100%;
 }
 .readiness-steps li {
   display: flex;
   gap: 1rem;
   align-items: flex-start;
+  background: #fff;
+  border: 1px solid #e8eef7;
+  border-radius: 16px;
+  padding: 1.25rem;
 }
 .readiness-step-num {
   flex-shrink: 0;
@@ -2346,11 +2376,11 @@ body {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: .55rem;
+  gap: .75rem;
 }
 .readiness-action-btn {
   font: inherit;
-  font-size: .82rem;
+  font-size: .95rem;
   font-weight: 600;
   padding: .6rem 1.1rem;
   border-radius: 999px;
